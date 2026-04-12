@@ -15,11 +15,9 @@ namespace FSO.Client.Utils.GameLocator
             ? @"HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\Valve\Steam"
             : @"HKEY_LOCAL_MACHINE\SOFTWARE\Valve\Steam";
 
-        private readonly Lazy<string> SteamInstallPath = new(() =>
-        {
-            string path = Registry.GetValue(SteamRegistryPath, "InstallPath", null)?.ToString();
-            return Directory.Exists(path) ? path : null;
-        }, isThreadSafe: true);
+        private readonly string SteamInstallPath;
+
+           
 
         public string FindTheSimsOnline()
         {
@@ -69,22 +67,27 @@ namespace FSO.Client.Utils.GameLocator
                 }
             }
 
-            string steamPath = SteamInstallPath.Value;
-
-            List<string> libraries = GetSteamLibraryPaths(steamPath);
-
-            foreach (string library in libraries)
-            {
-                string manifestPath = Path.Combine(library, "steamapps", $"appmanifest_{steamGameId}.acf");
-                if (!File.Exists(manifestPath)) continue;
-
-                if (TryGetInstallDir(manifestPath, out var installDir))
+                string path = Registry.GetValue(SteamRegistryPath, "InstallPath", null)?.ToString();
+                if (Directory.Exists(path)
                 {
-                    string gamePath = Path.Combine(library, "steamapps", "common", installDir);
-                    if (Directory.Exists(gamePath))
-                        return (gamePath + "\\").Replace('\\', '/');
+
+                    string steamPath = SteamInstallPath.Value;
+
+                    List<string> libraries = GetSteamLibraryPaths(steamPath);
+
+                    foreach (string library in libraries)
+                    {
+                        string manifestPath = Path.Combine(library, "steamapps", $"appmanifest_{steamGameId}.acf");
+                        if (!File.Exists(manifestPath)) continue;
+
+                        if (TryGetInstallDir(manifestPath, out var installDir))
+                        {
+                            string gamePath = Path.Combine(library, "steamapps", "common", installDir);
+                        if (Directory.Exists(gamePath))
+                            return (gamePath + "\\").Replace('\\', '/');
+                        }
+                    }
                 }
-            }
 
 
             return AppDomain.CurrentDomain.BaseDirectory;
