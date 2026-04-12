@@ -68,12 +68,12 @@ namespace FSO.Client.Utils.GameLocator
             }
 
                 string path = Registry.GetValue(SteamRegistryPath, "InstallPath", null)?.ToString();
-                if (Directory.Exists(path)
+                if (Directory.Exists(path))
                 {
 
                     string steamPath = SteamInstallPath.Value;
 
-                    List<string> libraries = GetSteamLibraryPaths(steamPath);
+                    List<string> libraryVdfPathlibraries = GetSteamLibraryPaths(steamPath);
 
                     foreach (string library in libraries)
                     {
@@ -87,6 +87,13 @@ namespace FSO.Client.Utils.GameLocator
                             return (gamePath + "\\").Replace('\\', '/');
                         }
                     }
+
+                    var libraries = new List<string> { steamPath };
+                    string libraryVdfPath = Path.Combine(steamPath, "steamapps", "libraryfolders.vdf");
+
+                    if (!File.Exists(libraryVdfPath))
+                        return libraryVdfPath;
+
                 }
 
 
