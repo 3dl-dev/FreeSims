@@ -10,6 +10,17 @@ namespace FSO.Client.Utils.GameLocator
 {
     public class WindowsLocator : ILocator
     {
+
+        private readonly string SteamRegistryPath = Environment.Is64BitOperatingSystem
+            ? @"HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\Valve\Steam"
+            : @"HKEY_LOCAL_MACHINE\SOFTWARE\Valve\Steam";
+
+        private readonly Lazy<string> SteamInstallPath = new(() =>
+        {
+            string path = Registry.GetValue(SteamRegistryPath, "InstallPath", null)?.ToString();
+            return Directory.Exists(path) ? path : null;
+        }, isThreadSafe: true);
+
         public string FindTheSimsOnline()
         {
             //string Software = "";
@@ -36,9 +47,9 @@ namespace FSO.Client.Utils.GameLocator
         }
 
 
-        public string FindTheSimsComplete()
+        public string FindTheSimsComplete()           
         {
-            //string Software = "";
+            
 
             using (var hklm = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry32))
             {
@@ -57,6 +68,25 @@ namespace FSO.Client.Utils.GameLocator
                     }
                 }
             }
+
+            string steamPath = SteamInstallPath.Value;
+
+            List<string> libraries = GetSteamLibraryPaths(steamPath);
+
+            foreach (string library in libraries)
+            {
+                string manifestPath = Path.Combine(library, "steamapps", $"appmanifest_{steamGameId}.acf");
+                if (!File.Exists(manifestPath)) continue;
+
+                if (TryGetInstallDir(manifestPath, out var installDir))
+                {
+                    string gamePath = Path.Combine(library, "steamapps", "common", installDir);
+                    if (Directory.Exists(gamePath))
+                        return (gamePath + "\\").Replace('\\', '/');
+                }
+            }
+
+
             return AppDomain.CurrentDomain.BaseDirectory;
         }
 
