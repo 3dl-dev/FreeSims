@@ -153,6 +153,14 @@ func main() {
 		}
 	}()
 
+	// Print pathfind-failed events to stdout as JSONL (reeims-9e7)
+	go func() {
+		for pf := range client.PathfindFailedCh {
+			out, _ := json.Marshal(pf)
+			fmt.Println(string(out))
+		}
+	}()
+
 	// Connect (blocks until connected or closed)
 	go func() {
 		if err := client.Connect(); err != nil {

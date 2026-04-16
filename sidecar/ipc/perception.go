@@ -97,3 +97,17 @@ type LotAvatar struct {
 	CurrentAnimation string           `json:"current_animation"`
 	Motives          LotAvatarMotives `json:"motives"`
 }
+
+// PathfindFailed is the JSON structure sent by the game when a pathfind fails
+// with a terminal HardFail (reeims-9e7). Only top-level routing frames emit this
+// event — nested portal sub-routes do not.
+//
+// reason values: "no-route", "no-path", "no-room-route", "blocked",
+// "cant-sit", "cant-stand", "no-valid-goals", "locked-door",
+// "interrupted", "unknown".
+type PathfindFailed struct {
+	Type           string `json:"type"`             // always "pathfind-failed"
+	SimPersistID   uint32 `json:"sim_persist_id"`
+	TargetObjectID int    `json:"target_object_id"` // 0 when no specific target
+	Reason         string `json:"reason"`
+}

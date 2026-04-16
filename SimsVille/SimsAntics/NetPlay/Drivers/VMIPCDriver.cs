@@ -26,6 +26,7 @@ using System.Linq;
 using System.Net.Sockets;
 using System.Text;
 using FSO.SimAntics.Diagnostics;
+using FSO.SimAntics.Engine;
 using FSO.SimAntics.NetPlay.Model;
 using FSO.SimAntics.NetPlay.Model.Commands;
 using GonzoNet;
@@ -58,6 +59,8 @@ namespace FSO.SimAntics.NetPlay.Drivers
             _listener.Bind(new UnixDomainSocketEndPoint(SocketPath));
             _listener.Listen(1);
             _listener.Blocking = false;
+
+            VMRoutingFrame.OnPathfindFailed += HandlePathfindFailed;
 
             Console.WriteLine($"[VMIPCDriver] Listening on {SocketPath}");
         }
@@ -104,6 +107,8 @@ namespace FSO.SimAntics.NetPlay.Drivers
         {
             if (_disposed) return;
             _disposed = true;
+
+            VMRoutingFrame.OnPathfindFailed -= HandlePathfindFailed;
 
             try { _client?.Shutdown(SocketShutdown.Both); } catch { }
             try { _client?.Close(); } catch { }
@@ -358,6 +363,27 @@ namespace FSO.SimAntics.NetPlay.Drivers
             try { _client?.Close(); } catch { }
             _client = null;
             _recvPos = 0;
+        }
+
+        /// <summary>
+        /// Handles VMRoutingFrame.OnPathfindFailed events and emits a JSON frame
+        /// to the connected IPC client.
+        /// Format: {"type":"pathfind-failed","sim_persist_id":X,"target_object_id":Y,"reason":"..."}
+        /// </summary>
+        private void HandlePathfindFailed(VMAvatar avatar, int targetObjectId, string reason)
+        {
+            if (_client == null) return;
+
+            var persistId = avatar.PersistID;
+            var escapedReason = reason.Replace("\\", "\\\\").Replace("\"", "\\\"");
+            var json = $"{{\"type\":\"pathfind-failed\",\"sim_persist_id\":{persistId},\"target_object_id\":{targetObjectId},\"reason\":\"{escapedReason}\"}}";
+            var jsonBytes = Encoding.UTF8.GetBytes(json);
+
+            var frame = new byte[4 + jsonBytes.Length];
+            BitConverter.TryWriteBytes(new Span<byte>(frame, 0, 4), jsonBytes.Length);
+            Buffer.BlockCopy(jsonBytes, 0, frame, 4, jsonBytes.Length);
+
+            SendPerceptionFrame(frame);
         }
 
         /// <summary>

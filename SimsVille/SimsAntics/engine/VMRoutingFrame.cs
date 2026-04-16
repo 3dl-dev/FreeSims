@@ -56,6 +56,17 @@ namespace FSO.SimAntics.Engine
         private static short SHOO_INTERACTION = 3;
         private static ushort SHOO_TREE = 4107;
 
+        /// <summary>
+        /// Fired when a pathfind fails with a terminal HardFail.
+        /// Parameters: (avatar, targetObjectId, reason).
+        /// targetObjectId is 0 when the route has no specific target object.
+        /// reason is one of: "no-route", "no-path", "no-room-route", "blocked",
+        /// "cant-sit", "cant-stand", "no-valid-goals", "dest-occupied",
+        /// "locked-door", "interrupted", "unknown".
+        /// Subscribers must be lightweight — called from the VM tick thread.
+        /// </summary>
+        public static event Action<VMAvatar, int, string> OnPathfindFailed;
+
         //each within-room route gets these allowances separately.
         private static int WAIT_TIMEOUT = 10 * 30; //10 seconds
         private static int MAX_RETRIES = 10;
@@ -198,6 +209,36 @@ namespace FSO.SimAntics.Engine
                 Thread.ExecuteSubRoutine(this, bhav, CodeOwner, new VMSubRoutineOperand(new short[] { (short)code, (blocker==null)?(short)0:blocker.ObjectID, 0, 0 }));
             }
             avatar.SetPersonData(VMPersonDataVariable.RouteResult, (short)code);
+
+            // Only fire the event for top-level routing frames (ParentRoute == null)
+            // to avoid duplicate events from nested portal sub-routes.
+            if (ParentRoute == null)
+            {
+                var targetId = (Target != null) ? (int)Target.ObjectID : 0;
+                var reason = FailCodeToReason(code);
+                OnPathfindFailed?.Invoke(avatar, targetId, reason);
+            }
+        }
+
+        /// <summary>
+        /// Maps a VMRouteFailCode to a human-readable reason string for the IPC event.
+        /// </summary>
+        private static string FailCodeToReason(VMRouteFailCode code)
+        {
+            switch (code)
+            {
+                case VMRouteFailCode.NoRoomRoute:    return "no-room-route";
+                case VMRouteFailCode.NoPath:          return "no-path";
+                case VMRouteFailCode.NoValidGoals:    return "no-valid-goals";
+                case VMRouteFailCode.DestTileOccupied:
+                case VMRouteFailCode.DestTileOccupiedPerson:
+                    return "blocked";
+                case VMRouteFailCode.CantSit:         return "cant-sit";
+                case VMRouteFailCode.CantStand:       return "cant-stand";
+                case VMRouteFailCode.WallInWay:       return "locked-door";
+                case VMRouteFailCode.Interrupted:     return "interrupted";
+                default:                              return "unknown";
+            }
         }
 
         private bool DoRoomRoute(VMFindLocationResult route)

@@ -239,6 +239,104 @@ func TestPerception_LotAvatars_ZeroLengthWhenAbsent(t *testing.T) {
 	}
 }
 
+// ── PathfindFailed tests (reeims-9e7) ─────────────────────────────────────────
+
+func TestPathfindFailed_Deserialized(t *testing.T) {
+	raw := []byte(`{"type":"pathfind-failed","sim_persist_id":42,"target_object_id":7,"reason":"no-path"}`)
+
+	var pf PathfindFailed
+	if err := json.Unmarshal(raw, &pf); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	if pf.Type != "pathfind-failed" {
+		t.Errorf("expected Type='pathfind-failed', got %q", pf.Type)
+	}
+	if pf.SimPersistID != 42 {
+		t.Errorf("expected SimPersistID=42, got %d", pf.SimPersistID)
+	}
+	if pf.TargetObjectID != 7 {
+		t.Errorf("expected TargetObjectID=7, got %d", pf.TargetObjectID)
+	}
+	if pf.Reason != "no-path" {
+		t.Errorf("expected Reason='no-path', got %q", pf.Reason)
+	}
+}
+
+func TestPathfindFailed_ZeroTargetObjectID(t *testing.T) {
+	raw := []byte(`{"type":"pathfind-failed","sim_persist_id":10,"target_object_id":0,"reason":"no-valid-goals"}`)
+
+	var pf PathfindFailed
+	if err := json.Unmarshal(raw, &pf); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	if pf.TargetObjectID != 0 {
+		t.Errorf("expected TargetObjectID=0 when no target, got %d", pf.TargetObjectID)
+	}
+}
+
+func TestPathfindFailed_RoundTrip(t *testing.T) {
+	original := PathfindFailed{
+		Type:           "pathfind-failed",
+		SimPersistID:   99,
+		TargetObjectID: 15,
+		Reason:         "blocked",
+	}
+
+	encoded, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	var decoded PathfindFailed
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	if decoded.Type != original.Type {
+		t.Errorf("round-trip Type: expected %q, got %q", original.Type, decoded.Type)
+	}
+	if decoded.SimPersistID != original.SimPersistID {
+		t.Errorf("round-trip SimPersistID: expected %d, got %d", original.SimPersistID, decoded.SimPersistID)
+	}
+	if decoded.TargetObjectID != original.TargetObjectID {
+		t.Errorf("round-trip TargetObjectID: expected %d, got %d", original.TargetObjectID, decoded.TargetObjectID)
+	}
+	if decoded.Reason != original.Reason {
+		t.Errorf("round-trip Reason: expected %q, got %q", original.Reason, decoded.Reason)
+	}
+}
+
+func TestPathfindFailed_AllReasonCategories(t *testing.T) {
+	reasons := []string{
+		"no-route", "no-path", "no-room-route", "blocked",
+		"cant-sit", "cant-stand", "no-valid-goals", "locked-door",
+		"interrupted", "unknown",
+	}
+	for _, reason := range reasons {
+		t.Run(reason, func(t *testing.T) {
+			pf := PathfindFailed{
+				Type:           "pathfind-failed",
+				SimPersistID:   1,
+				TargetObjectID: 0,
+				Reason:         reason,
+			}
+			encoded, err := json.Marshal(pf)
+			if err != nil {
+				t.Fatalf("marshal failed: %v", err)
+			}
+			var decoded PathfindFailed
+			if err := json.Unmarshal(encoded, &decoded); err != nil {
+				t.Fatalf("unmarshal failed: %v", err)
+			}
+			if decoded.Reason != reason {
+				t.Errorf("expected reason=%q, got %q", reason, decoded.Reason)
+			}
+		})
+	}
+}
+
 func TestPerception_LotAvatars_MotivesRoundTrip(t *testing.T) {
 	original := Perception{
 		Type:      "perception",

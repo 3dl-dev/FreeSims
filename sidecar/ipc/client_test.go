@@ -691,6 +691,193 @@ func TestLoadLotRoundTrip(t *testing.T) {
 	}
 }
 
+// TestPathfindFailedDispatch (reeims-9e7) verifies that a pathfind-failed JSON
+// frame emitted by the game is dispatched to PathfindFailedCh and parsed correctly.
+//
+//  1. Create a socket pair (fake-game listener + client).
+//  2. Fake-game sends a pathfind-failed JSON frame.
+//  3. Verify the client dispatches it to PathfindFailedCh with correct fields.
+//  4. Verify perception and response channels are NOT populated.
+func TestPathfindFailedDispatch(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "pf.sock")
+
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		accepted <- conn
+	}()
+
+	client := NewClient(sockPath)
+	defer client.Close()
+
+	go func() {
+		_ = client.Connect()
+	}()
+
+	var gameConn net.Conn
+	select {
+	case gameConn = <-accepted:
+		defer gameConn.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for client connect")
+	}
+
+	sendFrame := func(payload []byte) {
+		t.Helper()
+		frame := make([]byte, 4+len(payload))
+		binary.LittleEndian.PutUint32(frame[0:4], uint32(len(payload)))
+		copy(frame[4:], payload)
+		if _, err := gameConn.Write(frame); err != nil {
+			t.Fatalf("write frame: %v", err)
+		}
+	}
+
+	// Send a pathfind-failed JSON frame
+	pfJSON := []byte(`{"type":"pathfind-failed","sim_persist_id":42,"target_object_id":7,"reason":"no-path"}`)
+	sendFrame(pfJSON)
+
+	// Verify it arrives on PathfindFailedCh
+	select {
+	case pf := <-client.PathfindFailedCh:
+		if pf.Type != "pathfind-failed" {
+			t.Errorf("Type = %q, want pathfind-failed", pf.Type)
+		}
+		if pf.SimPersistID != 42 {
+			t.Errorf("SimPersistID = %d, want 42", pf.SimPersistID)
+		}
+		if pf.TargetObjectID != 7 {
+			t.Errorf("TargetObjectID = %d, want 7", pf.TargetObjectID)
+		}
+		if pf.Reason != "no-path" {
+			t.Errorf("Reason = %q, want no-path", pf.Reason)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for pathfind-failed event on PathfindFailedCh")
+	}
+
+	// Verify PerceptionCh is empty (event was NOT forwarded there)
+	select {
+	case p := <-client.PerceptionCh:
+		t.Errorf("PerceptionCh unexpectedly received: %s", string(p))
+	default:
+		// correct: PerceptionCh should be empty
+	}
+
+	// Verify ResponseCh is empty
+	select {
+	case rf := <-client.ResponseCh:
+		t.Errorf("ResponseCh unexpectedly received request_id=%s", rf.RequestID)
+	default:
+		// correct: ResponseCh should be empty
+	}
+}
+
+// TestPathfindFailedInterleaved verifies that pathfind-failed events are correctly
+// dispatched even when interleaved with perception events and tick acks.
+func TestPathfindFailedInterleaved(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "pf-interleaved.sock")
+
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		accepted <- conn
+	}()
+
+	client := NewClient(sockPath)
+	defer client.Close()
+
+	go func() {
+		_ = client.Connect()
+	}()
+
+	var gameConn net.Conn
+	select {
+	case gameConn = <-accepted:
+		defer gameConn.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for client connect")
+	}
+
+	sendFrame := func(payload []byte) {
+		t.Helper()
+		frame := make([]byte, 4+len(payload))
+		binary.LittleEndian.PutUint32(frame[0:4], uint32(len(payload)))
+		copy(frame[4:], payload)
+		if _, err := gameConn.Write(frame); err != nil {
+			t.Fatalf("write frame: %v", err)
+		}
+	}
+
+	// 1. Perception event
+	percJSON := []byte(`{"type":"perception","persist_id":1,"sim_id":1,"name":"Daisy"}`)
+	sendFrame(percJSON)
+
+	// 2. Pathfind failed
+	pfJSON := []byte(`{"type":"pathfind-failed","sim_persist_id":99,"target_object_id":0,"reason":"blocked"}`)
+	sendFrame(pfJSON)
+
+	// 3. Tick ack (binary)
+	ackFrame := make([]byte, 4+ackPayloadSize)
+	binary.LittleEndian.PutUint32(ackFrame[0:4], ackPayloadSize)
+	binary.LittleEndian.PutUint32(ackFrame[4:8], 5)
+	binary.LittleEndian.PutUint32(ackFrame[8:12], 0)
+	binary.LittleEndian.PutUint64(ackFrame[12:20], 123)
+	if _, err := gameConn.Write(ackFrame); err != nil {
+		t.Fatal("write ack:", err)
+	}
+
+	// Verify perception on PerceptionCh
+	select {
+	case p := <-client.PerceptionCh:
+		if string(p) != string(percJSON) {
+			t.Errorf("perception = %q, want %q", string(p), string(percJSON))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for perception")
+	}
+
+	// Verify pathfind-failed on PathfindFailedCh
+	select {
+	case pf := <-client.PathfindFailedCh:
+		if pf.SimPersistID != 99 {
+			t.Errorf("SimPersistID = %d, want 99", pf.SimPersistID)
+		}
+		if pf.Reason != "blocked" {
+			t.Errorf("Reason = %q, want blocked", pf.Reason)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for pathfind-failed event")
+	}
+
+	// Verify tick ack on AckCh
+	select {
+	case ack := <-client.AckCh:
+		if ack.TickID != 5 {
+			t.Errorf("TickID = %d, want 5", ack.TickID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for ack")
+	}
+}
+
 func readFull(conn net.Conn, buf []byte) (int, error) {
 	total := 0
 	for total < len(buf) {
