@@ -45,6 +45,9 @@ namespace FSO.SimAntics.NetPlay.Model
             { VMCommandType.LoadLot, typeof(VMNetLoadLotCmd) },
             { VMCommandType.QuerySimState, typeof(VMNetQuerySimStateCmd) },
             { VMCommandType.QueryInventory, typeof(VMNetQueryInventoryCmd) },
+            { VMCommandType.QueryWallAt, typeof(VMNetQueryWallAtCmd) },
+            { VMCommandType.QueryFloorAt, typeof(VMNetQueryFloorAtCmd) },
+            { VMCommandType.QueryTilePathable, typeof(VMNetQueryTilePathableCmd) },
 
         };
         public static Dictionary<Type, VMCommandType> ReverseMap = CmdMap.ToDictionary(x => x.Value, x => x.Key);
@@ -160,6 +163,27 @@ namespace FSO.SimAntics.NetPlay.Model
         /// Agent sends ActorUID; game responds with the current vm.MyInventory list
         /// as a JSON array. Response payload: {"inventory":[{object_pid,guid,name,value,inventory_index}...]}.
         /// </summary>
-        QueryInventory = 39
+        QueryInventory = 39,
+
+        /// <summary>
+        /// Query wall state at a specific tile (reeims-d3c).
+        /// Agent sends x, y, level; game responds with WallTile fields as JSON.
+        /// Response payload: {"has_wall":bool,"segments":N,"top_left_pattern":N,...}
+        /// </summary>
+        QueryWallAt = 40,
+
+        /// <summary>
+        /// Query floor tile state at a specific tile (reeims-d3c).
+        /// Agent sends x, y, level; game responds with FloorTile fields as JSON.
+        /// Response payload: {"has_floor":bool,"pattern_id":N}
+        /// </summary>
+        QueryFloorAt = 41,
+
+        /// <summary>
+        /// Query whether a tile is pathable (can a Sim stand there?) (reeims-d3c).
+        /// Best-effort static check: bounds, solid walls, entity footprints.
+        /// Response payload: {"pathable":bool,"reason":"clear"|"wall"|"blocked_by_object"|"out_of_bounds"}
+        /// </summary>
+        QueryTilePathable = 42
     }
 }

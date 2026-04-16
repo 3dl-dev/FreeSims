@@ -86,7 +86,7 @@ type jsonCommand struct {
 
 	// Dialog-response fields (reeims-9be)
 	DialogID     uint32 `json:"dialog_id,omitempty"`
-	Button       string `json:"button,omitempty"`       // "Yes", "No", "Cancel", or custom label
+	Button       string `json:"button,omitempty"`        // "Yes", "No", "Cancel", or custom label
 	ResponseText string `json:"response_text,omitempty"` // free-text response (text-input dialogs)
 }
 
@@ -430,6 +430,48 @@ func parseCommand(jcmd jsonCommand) (ipc.Command, error) {
 		return &ipc.QueryInventoryCmd{
 			ActorUID:  jcmd.ActorUID,
 			RequestID: jcmd.RequestID,
+		}, nil
+
+	case "query-wall-at":
+		// Query WallTile at (x, y, level). Requires request_id to receive response.
+		level := jcmd.Level
+		if level == 0 {
+			level = 1
+		}
+		return &ipc.QueryWallAtCmd{
+			ActorUID:  jcmd.ActorUID,
+			RequestID: jcmd.RequestID,
+			X:         jcmd.X,
+			Y:         jcmd.Y,
+			Level:     byte(level),
+		}, nil
+
+	case "query-floor-at":
+		// Query FloorTile at (x, y, level). Requires request_id to receive response.
+		level := jcmd.Level
+		if level == 0 {
+			level = 1
+		}
+		return &ipc.QueryFloorAtCmd{
+			ActorUID:  jcmd.ActorUID,
+			RequestID: jcmd.RequestID,
+			X:         jcmd.X,
+			Y:         jcmd.Y,
+			Level:     byte(level),
+		}, nil
+
+	case "query-tile-pathable":
+		// Query whether tile (x, y, level) is pathable. Requires request_id.
+		level := jcmd.Level
+		if level == 0 {
+			level = 1
+		}
+		return &ipc.QueryTilePathableCmd{
+			ActorUID:  jcmd.ActorUID,
+			RequestID: jcmd.RequestID,
+			X:         jcmd.X,
+			Y:         jcmd.Y,
+			Level:     byte(level),
 		}, nil
 
 	case "dialog-response":

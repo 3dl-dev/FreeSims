@@ -16,6 +16,24 @@ import (
 	"time"
 )
 
+// waitConnected polls until the Client's internal conn is non-nil (Connect
+// completed) or the deadline expires. This prevents the race where the OS-level
+// accept fires on the server side before the client goroutine has stored c.conn.
+func waitConnected(t *testing.T, client *Client) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		client.mu.Lock()
+		conn := client.conn
+		client.mu.Unlock()
+		if conn != nil {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("timeout waiting for client.conn to be set")
+}
+
 // TestClientRoundTrip creates a fake VMIPCDriver (a listening Unix socket),
 // connects the Client, sends a chat command, and verifies both the frame
 // on the wire and the tick ack coming back.
@@ -56,6 +74,10 @@ func TestClientRoundTrip(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for client connect")
 	}
+
+	// Wait until the client goroutine has stored conn — the OS-level accept
+	// fires on the server before the client goroutine sets c.conn.
+	waitConnected(t, client)
 
 	// Send a chat command
 	cmd := &ChatCmd{ActorUID: 1, Message: "Hi"}
@@ -258,6 +280,9 @@ func TestRequestResponseCorrelation(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for client connect")
 	}
+
+	// Wait until the client goroutine has stored conn before sending.
+	waitConnected(t, client)
 
 	// Build and send a ChatCmd with RequestID="abc123"
 	const reqID = "abc123"
@@ -465,6 +490,8 @@ func TestQueryCatalogRoundTrip(t *testing.T) {
 		t.Fatal("timeout waiting for client connect")
 	}
 
+	waitConnected(t, client)
+
 	// Build and send a QueryCatalogCmd with RequestID="qc1"
 	const reqID = "qc1"
 	cmd := &QueryCatalogCmd{ActorUID: 28, Category: "all", RequestID: reqID}
@@ -614,6 +641,8 @@ func TestLoadLotRoundTrip(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for client connect")
 	}
+
+	waitConnected(t, client)
 
 	const reqID = "ll1"
 	const houseXml = "house2.xml"
@@ -919,6 +948,8 @@ func TestQuerySimStateRoundTrip(t *testing.T) {
 		t.Fatal("timeout waiting for client connect")
 	}
 
+	waitConnected(t, client)
+
 	const reqID = "qs1"
 	const simPersistID = uint32(28)
 	cmd := &QuerySimStateCmd{ActorUID: 0, RequestID: reqID, SimPersistID: simPersistID}
@@ -1166,6 +1197,8 @@ func TestDialogResponseCmdSocketRoundTrip(t *testing.T) {
 		t.Fatal("timeout waiting for client connect")
 	}
 
+	waitConnected(t, client)
+
 	// Send a dialog-response command
 	cmd := &DialogResponseCmd{DialogID: 5, ResponseCode: 0, ResponseText: ""}
 	payload, err := SerializeCommand(cmd)
@@ -1317,6 +1350,126 @@ func readFull(conn net.Conn, buf []byte) (int, error) {
 		total += n
 	}
 	return total, nil
+}
+
+// --- QueryWallAt socket round-trip test (reeims-d3c) ---
+//
+// Verifies the full wire path: sidecar serializes QueryWallAtCmd → sends over
+// Unix socket → fake-game reads the frame and verifies the bytes → fake-game
+// sends back a JSON response frame → client receives it on ResponseCh.
+func TestQueryWallAtRoundTrip(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "qwall.sock")
+
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		accepted <- conn
+	}()
+
+	client := NewClient(sockPath)
+	defer client.Close()
+	go func() { _ = client.Connect() }()
+
+	var gameConn net.Conn
+	select {
+	case gameConn = <-accepted:
+		defer gameConn.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for client connect")
+	}
+
+	waitConnected(t, client)
+
+	const reqID = "qw1"
+	cmd := &QueryWallAtCmd{ActorUID: 0, RequestID: reqID, X: 5, Y: 10, Level: 1}
+	payload, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal("serialize:", err)
+	}
+	if err := client.SendFrame(payload); err != nil {
+		t.Fatal("send:", err)
+	}
+
+	// Read frame on the game side and verify wire format.
+	// Layout: [type=40][uid:4][hasReq=1][len(3)+"qw1"][x:2][y:2][level:1] = 15 bytes
+	gameConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var lenBuf [4]byte
+	if _, err := readFull(gameConn, lenBuf[:]); err != nil {
+		t.Fatal("read frame length:", err)
+	}
+	frameLen := int(binary.LittleEndian.Uint32(lenBuf[:]))
+	frameBuf := make([]byte, frameLen)
+	if _, err := readFull(gameConn, frameBuf); err != nil {
+		t.Fatal("read frame payload:", err)
+	}
+
+	// Verify type byte = 40
+	if frameBuf[0] != byte(CmdQueryWallAt) {
+		t.Errorf("type byte = %d, want %d (CmdQueryWallAt=40)", frameBuf[0], CmdQueryWallAt)
+	}
+	// uid = 0 at offsets 1..4
+	uid := binary.LittleEndian.Uint32(frameBuf[1:5])
+	if uid != 0 {
+		t.Errorf("ActorUID = %d, want 0", uid)
+	}
+	// hasReq = 1 at offset 5
+	if frameBuf[5] != 1 {
+		t.Errorf("hasRequestID = %d, want 1", frameBuf[5])
+	}
+	// reqID length = 3 at offset 6
+	if frameBuf[6] != 3 {
+		t.Errorf("requestID length = %d, want 3", frameBuf[6])
+	}
+	if string(frameBuf[7:10]) != reqID {
+		t.Errorf("requestID = %q, want %q", string(frameBuf[7:10]), reqID)
+	}
+	// x=5 at offsets 10..11
+	if int16(binary.LittleEndian.Uint16(frameBuf[10:12])) != 5 {
+		t.Errorf("X = %d, want 5", int16(binary.LittleEndian.Uint16(frameBuf[10:12])))
+	}
+	// y=10 at offsets 12..13
+	if int16(binary.LittleEndian.Uint16(frameBuf[12:14])) != 10 {
+		t.Errorf("Y = %d, want 10", int16(binary.LittleEndian.Uint16(frameBuf[12:14])))
+	}
+	// level=1 at offset 14
+	if frameBuf[14] != 1 {
+		t.Errorf("Level = %d, want 1", frameBuf[14])
+	}
+
+	// Fake-game sends back a JSON response frame with the matching request_id.
+	respJSON := `{"type":"response","request_id":"qw1","status":"ok","payload":{"has_wall":true,"segments":3,"top_left_pattern":494,"top_right_pattern":0,"bottom_left_pattern":0,"bottom_right_pattern":0,"top_left_style":1,"top_right_style":0}}`
+	respBytes := []byte(respJSON)
+	var respLenBuf [4]byte
+	binary.LittleEndian.PutUint32(respLenBuf[:], uint32(len(respBytes)))
+	gameConn.SetWriteDeadline(time.Now().Add(2 * time.Second))
+	if _, err := gameConn.Write(respLenBuf[:]); err != nil {
+		t.Fatal("write response length:", err)
+	}
+	if _, err := gameConn.Write(respBytes); err != nil {
+		t.Fatal("write response payload:", err)
+	}
+
+	// Client should receive the response on ResponseCh.
+	select {
+	case rf := <-client.ResponseCh:
+		if rf.RequestID != reqID {
+			t.Errorf("ResponseFrame.RequestID = %q, want %q", rf.RequestID, reqID)
+		}
+		if rf.Status != "ok" {
+			t.Errorf("ResponseFrame.Status = %q, want ok", rf.Status)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for response on ResponseCh")
+	}
 }
 
 // Ensure temp socket cleanup

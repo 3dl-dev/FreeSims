@@ -1088,3 +1088,213 @@ func TestButtonLabelToResponseCode_Cancel(t *testing.T) {
 		}
 	}
 }
+
+// --- Build-mode query command tests (reeims-d3c) ---
+//
+// Wire format shared by QueryWallAt/QueryFloorAt/QueryTilePathable (after type byte):
+//   [uid:4][hasReq:1][if 1: 7bit-len+reqID][x:2 LE][y:2 LE][level:1]
+
+func TestQueryWallAtCmdType_Is40(t *testing.T) {
+	cmd := &QueryWallAtCmd{}
+	if cmd.CmdType() != CmdQueryWallAt {
+		t.Errorf("CmdType() = %d, want %d (CmdQueryWallAt)", cmd.CmdType(), CmdQueryWallAt)
+	}
+	if byte(CmdQueryWallAt) != 40 {
+		t.Errorf("CmdQueryWallAt byte value = %d, want 40", byte(CmdQueryWallAt))
+	}
+}
+
+func TestQueryWallAtCmdSerialize_NoRequestID(t *testing.T) {
+	cmd := &QueryWallAtCmd{ActorUID: 28, RequestID: "", X: 5, Y: 10, Level: 1}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Layout: [type=40][uid:4][hasReq=0][x:2][y:2][level:1] = 11 bytes total
+	if data[0] != byte(CmdQueryWallAt) {
+		t.Errorf("type byte = %d, want %d (QueryWallAt=40)", data[0], CmdQueryWallAt)
+	}
+	if len(data) != 11 {
+		t.Fatalf("total bytes = %d, want 11", len(data))
+	}
+	if binary.LittleEndian.Uint32(data[1:5]) != 28 {
+		t.Errorf("ActorUID mismatch")
+	}
+	if data[5] != 0 {
+		t.Errorf("hasRequestID = %d, want 0", data[5])
+	}
+	if int16(binary.LittleEndian.Uint16(data[6:8])) != 5 {
+		t.Errorf("X = %d, want 5", int16(binary.LittleEndian.Uint16(data[6:8])))
+	}
+	if int16(binary.LittleEndian.Uint16(data[8:10])) != 10 {
+		t.Errorf("Y = %d, want 10", int16(binary.LittleEndian.Uint16(data[8:10])))
+	}
+	if data[10] != 1 {
+		t.Errorf("Level = %d, want 1", data[10])
+	}
+}
+
+func TestQueryWallAtCmdSerialize_WithRequestID(t *testing.T) {
+	cmd := &QueryWallAtCmd{ActorUID: 1, RequestID: "wq1", X: -3, Y: 255, Level: 2}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Layout: [type=40][uid:4][hasReq=1][len(3)+"wq1"][x:2][y:2][level:1] = 1+4+1+1+3+2+2+1 = 15 bytes
+	if len(data) != 15 {
+		t.Fatalf("total bytes = %d, want 15", len(data))
+	}
+	// type byte at 0, uid at 1..4
+	if data[0] != byte(CmdQueryWallAt) {
+		t.Errorf("type byte = %d, want 40", data[0])
+	}
+	if data[5] != 1 {
+		t.Errorf("hasRequestID = %d, want 1", data[5])
+	}
+	if data[6] != 3 {
+		t.Errorf("requestID length = %d, want 3", data[6])
+	}
+	if string(data[7:10]) != "wq1" {
+		t.Errorf("requestID = %q, want wq1", string(data[7:10]))
+	}
+	if int16(binary.LittleEndian.Uint16(data[10:12])) != -3 {
+		t.Errorf("X = %d, want -3", int16(binary.LittleEndian.Uint16(data[10:12])))
+	}
+	if int16(binary.LittleEndian.Uint16(data[12:14])) != 255 {
+		t.Errorf("Y = %d, want 255", int16(binary.LittleEndian.Uint16(data[12:14])))
+	}
+	if data[14] != 2 {
+		t.Errorf("Level = %d, want 2", data[14])
+	}
+}
+
+func TestQueryFloorAtCmdType_Is41(t *testing.T) {
+	cmd := &QueryFloorAtCmd{}
+	if cmd.CmdType() != CmdQueryFloorAt {
+		t.Errorf("CmdType() = %d, want %d (CmdQueryFloorAt)", cmd.CmdType(), CmdQueryFloorAt)
+	}
+	if byte(CmdQueryFloorAt) != 41 {
+		t.Errorf("CmdQueryFloorAt byte value = %d, want 41", byte(CmdQueryFloorAt))
+	}
+}
+
+func TestQueryFloorAtCmdSerialize_NoRequestID(t *testing.T) {
+	cmd := &QueryFloorAtCmd{ActorUID: 0, RequestID: "", X: 12, Y: 3, Level: 1}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Layout: [type=41][uid:4][hasReq=0][x:2][y:2][level:1] = 11 bytes total
+	if data[0] != byte(CmdQueryFloorAt) {
+		t.Errorf("type byte = %d, want %d (QueryFloorAt=41)", data[0], CmdQueryFloorAt)
+	}
+	if len(data) != 11 {
+		t.Fatalf("total bytes = %d, want 11", len(data))
+	}
+	if data[5] != 0 {
+		t.Errorf("hasRequestID = %d, want 0", data[5])
+	}
+	if int16(binary.LittleEndian.Uint16(data[6:8])) != 12 {
+		t.Errorf("X = %d, want 12", int16(binary.LittleEndian.Uint16(data[6:8])))
+	}
+	if int16(binary.LittleEndian.Uint16(data[8:10])) != 3 {
+		t.Errorf("Y = %d, want 3", int16(binary.LittleEndian.Uint16(data[8:10])))
+	}
+	if data[10] != 1 {
+		t.Errorf("Level = %d, want 1", data[10])
+	}
+}
+
+func TestQueryFloorAtCmdSerialize_WithRequestID(t *testing.T) {
+	cmd := &QueryFloorAtCmd{ActorUID: 7, RequestID: "fq1", X: 0, Y: 0, Level: 1}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Layout: [type=41][uid:4][hasReq=1][len(3)+"fq1"][x:2][y:2][level:1] = 15 bytes
+	if len(data) != 15 {
+		t.Fatalf("total bytes = %d, want 15", len(data))
+	}
+	if data[5] != 1 {
+		t.Errorf("hasRequestID = %d, want 1", data[5])
+	}
+	if string(data[7:10]) != "fq1" {
+		t.Errorf("requestID = %q, want fq1", string(data[7:10]))
+	}
+}
+
+func TestQueryTilePathableCmdType_Is42(t *testing.T) {
+	cmd := &QueryTilePathableCmd{}
+	if cmd.CmdType() != CmdQueryTilePathable {
+		t.Errorf("CmdType() = %d, want %d (CmdQueryTilePathable)", cmd.CmdType(), CmdQueryTilePathable)
+	}
+	if byte(CmdQueryTilePathable) != 42 {
+		t.Errorf("CmdQueryTilePathable byte value = %d, want 42", byte(CmdQueryTilePathable))
+	}
+}
+
+func TestQueryTilePathableCmdSerialize_NoRequestID(t *testing.T) {
+	cmd := &QueryTilePathableCmd{ActorUID: 0, RequestID: "", X: 8, Y: 8, Level: 1}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Layout: [type=42][uid:4][hasReq=0][x:2][y:2][level:1] = 11 bytes total
+	if data[0] != byte(CmdQueryTilePathable) {
+		t.Errorf("type byte = %d, want %d (QueryTilePathable=42)", data[0], CmdQueryTilePathable)
+	}
+	if len(data) != 11 {
+		t.Fatalf("total bytes = %d, want 11", len(data))
+	}
+	if data[5] != 0 {
+		t.Errorf("hasRequestID = %d, want 0", data[5])
+	}
+	if int16(binary.LittleEndian.Uint16(data[6:8])) != 8 {
+		t.Errorf("X = %d, want 8", int16(binary.LittleEndian.Uint16(data[6:8])))
+	}
+	if int16(binary.LittleEndian.Uint16(data[8:10])) != 8 {
+		t.Errorf("Y = %d, want 8", int16(binary.LittleEndian.Uint16(data[8:10])))
+	}
+	if data[10] != 1 {
+		t.Errorf("Level = %d, want 1", data[10])
+	}
+}
+
+func TestQueryTilePathableCmdSerialize_RequestIDBeforeCoords(t *testing.T) {
+	// Regression: RequestID MUST precede x/y/level in the wire format.
+	// If serialized in the wrong order, the C# Deserialize will read garbled x/y/level.
+	cmd := &QueryTilePathableCmd{ActorUID: 0, RequestID: "tp1", X: 3, Y: 5, Level: 1}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Expected layout after type byte:
+	//   data[0] = 42 (type)
+	//   data[1..4] = 0 (uid LE)
+	//   data[5]   = 1 (hasReq)
+	//   data[6]   = 3 (len("tp1"))
+	//   data[7..9] = "tp1"
+	//   data[10..11] = 3 LE (x)
+	//   data[12..13] = 5 LE (y)
+	//   data[14]  = 1 (level)
+	if len(data) != 15 {
+		t.Fatalf("total bytes = %d, want 15", len(data))
+	}
+	if data[5] != 1 {
+		t.Errorf("hasRequestID = %d, want 1", data[5])
+	}
+	if string(data[7:10]) != "tp1" {
+		t.Errorf("requestID = %q, want tp1 (must precede coords)", string(data[7:10]))
+	}
+	if int16(binary.LittleEndian.Uint16(data[10:12])) != 3 {
+		t.Errorf("X at offset 10 = %d, want 3", int16(binary.LittleEndian.Uint16(data[10:12])))
+	}
+	if int16(binary.LittleEndian.Uint16(data[12:14])) != 5 {
+		t.Errorf("Y at offset 12 = %d, want 5", int16(binary.LittleEndian.Uint16(data[12:14])))
+	}
+}

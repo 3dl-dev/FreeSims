@@ -35,6 +35,9 @@ const (
 	CmdQueryCatalog      VMCommandType = 36
 	CmdLoadLot           VMCommandType = 37
 	CmdQuerySimState     VMCommandType = 38
+	CmdQueryWallAt       VMCommandType = 40
+	CmdQueryFloorAt      VMCommandType = 41
+	CmdQueryTilePathable VMCommandType = 42
 )
 
 // ArchCommandType mirrors the C# VMArchitectureCommandType enum (byte).
@@ -690,6 +693,143 @@ func (c *DialogResponseCmd) Serialize(buf *bytes.Buffer) error {
 	writeActorUID(buf, c.DialogID)
 	buf.WriteByte(c.ResponseCode)
 	writeBinaryString(buf, c.ResponseText)
+	return nil
+}
+
+// --- QueryWallAt command (reeims-d3c) ---
+//
+// QueryWallAtCmd queries the WallTile at a specific tile and level.
+// The game responds with the full WallTile field set as a JSON object.
+//
+// Wire format (after VMCommandType byte = 40):
+//
+//	[ActorUID: 4 bytes LE]
+//	[hasRequestID: byte]              (0 or 1)
+//	[if 1: 7-bit-length-prefixed UTF-8 requestID]
+//	[x: int16 LE]                     tile x (0-based)
+//	[y: int16 LE]                     tile y (0-based)
+//	[level: byte]                     floor level (1-based; 1 = ground)
+//
+// Response on success:
+//
+//	{"type":"response","request_id":"...","status":"ok",
+//	 "payload":{"has_wall":bool,"segments":N,"top_left_pattern":N,
+//	            "top_right_pattern":N,"bottom_left_pattern":N,
+//	            "bottom_right_pattern":N,"top_left_style":N,"top_right_style":N}}
+type QueryWallAtCmd struct {
+	ActorUID  uint32
+	RequestID string // optional correlation ID
+	X         int16
+	Y         int16
+	Level     byte
+}
+
+func (c *QueryWallAtCmd) CmdType() VMCommandType { return CmdQueryWallAt }
+
+func (c *QueryWallAtCmd) Serialize(buf *bytes.Buffer) error {
+	writeActorUID(buf, c.ActorUID)
+
+	// RequestID before x/y/level per wire format spec.
+	if c.RequestID == "" {
+		buf.WriteByte(0)
+	} else {
+		buf.WriteByte(1)
+		writeBinaryString(buf, c.RequestID)
+	}
+
+	// x: int16 LE
+	b := make([]byte, 5)
+	binary.LittleEndian.PutUint16(b[0:2], uint16(c.X))
+	binary.LittleEndian.PutUint16(b[2:4], uint16(c.Y))
+	b[4] = c.Level
+	buf.Write(b)
+	return nil
+}
+
+// --- QueryFloorAt command (reeims-d3c) ---
+//
+// QueryFloorAtCmd queries the FloorTile at a specific tile and level.
+// The game responds with {"has_floor":bool,"pattern_id":N}.
+//
+// Wire format (after VMCommandType byte = 41):
+//
+//	[ActorUID: 4 bytes LE]
+//	[hasRequestID: byte]              (0 or 1)
+//	[if 1: 7-bit-length-prefixed UTF-8 requestID]
+//	[x: int16 LE]                     tile x (0-based)
+//	[y: int16 LE]                     tile y (0-based)
+//	[level: byte]                     floor level (1-based; 1 = ground)
+type QueryFloorAtCmd struct {
+	ActorUID  uint32
+	RequestID string // optional correlation ID
+	X         int16
+	Y         int16
+	Level     byte
+}
+
+func (c *QueryFloorAtCmd) CmdType() VMCommandType { return CmdQueryFloorAt }
+
+func (c *QueryFloorAtCmd) Serialize(buf *bytes.Buffer) error {
+	writeActorUID(buf, c.ActorUID)
+
+	if c.RequestID == "" {
+		buf.WriteByte(0)
+	} else {
+		buf.WriteByte(1)
+		writeBinaryString(buf, c.RequestID)
+	}
+
+	b := make([]byte, 5)
+	binary.LittleEndian.PutUint16(b[0:2], uint16(c.X))
+	binary.LittleEndian.PutUint16(b[2:4], uint16(c.Y))
+	b[4] = c.Level
+	buf.Write(b)
+	return nil
+}
+
+// --- QueryTilePathable command (reeims-d3c) ---
+//
+// QueryTilePathableCmd queries whether a tile can be stood on by a Sim.
+// The game performs a best-effort static check (bounds, walls, object footprints).
+//
+// Wire format (after VMCommandType byte = 42):
+//
+//	[ActorUID: 4 bytes LE]
+//	[hasRequestID: byte]              (0 or 1)
+//	[if 1: 7-bit-length-prefixed UTF-8 requestID]
+//	[x: int16 LE]                     tile x (0-based)
+//	[y: int16 LE]                     tile y (0-based)
+//	[level: byte]                     floor level (1-based; 1 = ground)
+//
+// Response:
+//
+//	{"type":"response","request_id":"...","status":"ok",
+//	 "payload":{"pathable":bool,"reason":"clear"|"wall"|"blocked_by_object"|"out_of_bounds"}}
+type QueryTilePathableCmd struct {
+	ActorUID  uint32
+	RequestID string // optional correlation ID
+	X         int16
+	Y         int16
+	Level     byte
+}
+
+func (c *QueryTilePathableCmd) CmdType() VMCommandType { return CmdQueryTilePathable }
+
+func (c *QueryTilePathableCmd) Serialize(buf *bytes.Buffer) error {
+	writeActorUID(buf, c.ActorUID)
+
+	if c.RequestID == "" {
+		buf.WriteByte(0)
+	} else {
+		buf.WriteByte(1)
+		writeBinaryString(buf, c.RequestID)
+	}
+
+	b := make([]byte, 5)
+	binary.LittleEndian.PutUint16(b[0:2], uint16(c.X))
+	binary.LittleEndian.PutUint16(b[2:4], uint16(c.Y))
+	b[4] = c.Level
+	buf.Write(b)
 	return nil
 }
 
