@@ -31,6 +31,7 @@ type Perception struct {
 	ActionQueue      []QueuedAction `json:"action_queue"`
 	NearbyObjects    []NearbyObject `json:"nearby_objects"`
 	LotAvatars       []LotAvatar    `json:"lot_avatars"`
+	Skills           Skills         `json:"skills"`             // TS1 skill values (§reeims-edc)
 }
 
 // Motives holds the eight core motive values plus derived mood.
@@ -73,6 +74,18 @@ type NearbyObject struct {
 type Interaction struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
+}
+
+// Skills holds the six TS1 skill values for the controlled Sim (§reeims-edc).
+// PersonData indices: Cooking=10, Charisma=11, Mechanical=12, Creativity=15, Body=17, Logic=18.
+// Values are in the range [0, 1000].
+type Skills struct {
+	Cooking    int16 `json:"cooking"`
+	Charisma   int16 `json:"charisma"`
+	Mechanical int16 `json:"mechanical"`
+	Creativity int16 `json:"creativity"`
+	Body       int16 `json:"body"`
+	Logic      int16 `json:"logic"`
 }
 
 // LotAvatarMotives holds the eight core motive values plus derived mood for a lot avatar.
