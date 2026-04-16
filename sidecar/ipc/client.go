@@ -69,6 +69,11 @@ type Client struct {
 	// by inspecting ResponseFrame.RequestID. Buffered to avoid blocking.
 	ResponseCh chan ResponseFrame
 
+	// PathfindFailedCh receives pathfind-failed events (reeims-9e7).
+	// Dedicated channel so agents can select on it separately from
+	// perception events and replan routing without scanning PerceptionCh.
+	PathfindFailedCh chan PathfindFailed
+
 	done chan struct{}
 }
 
@@ -76,11 +81,12 @@ type Client struct {
 // Call Connect to establish the connection.
 func NewClient(sockPath string) *Client {
 	return &Client{
-		sockPath:     sockPath,
-		AckCh:        make(chan TickAck, 64),
-		PerceptionCh: make(chan []byte, 64),
-		ResponseCh:   make(chan ResponseFrame, 64),
-		done:         make(chan struct{}),
+		sockPath:         sockPath,
+		AckCh:            make(chan TickAck, 64),
+		PerceptionCh:     make(chan []byte, 64),
+		ResponseCh:       make(chan ResponseFrame, 64),
+		PathfindFailedCh: make(chan PathfindFailed, 64),
+		done:             make(chan struct{}),
 	}
 }
 
@@ -237,6 +243,17 @@ func (c *Client) dispatchJSONFrame(payload []byte) {
 		case c.PerceptionCh <- cp:
 		default:
 			log.Printf("[ipc] perception channel full, dropping event")
+		}
+	case "pathfind-failed":
+		var pf PathfindFailed
+		if err := json.Unmarshal(payload, &pf); err != nil {
+			log.Printf("[ipc] pathfind-failed frame unmarshal error: %v", err)
+			return
+		}
+		select {
+		case c.PathfindFailedCh <- pf:
+		default:
+			log.Printf("[ipc] pathfind-failed channel full, dropping event for sim_persist_id=%d", pf.SimPersistID)
 		}
 	default:
 		// Forward unknown JSON types to perception channel for backward compat.
