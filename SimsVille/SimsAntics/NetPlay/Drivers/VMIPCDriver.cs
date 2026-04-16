@@ -216,28 +216,62 @@ namespace FSO.SimAntics.NetPlay.Drivers
             }
 
             // Parse complete frames
-            int offset = 0;
-            while (offset + 4 <= _recvPos)
+            var (parsed, consumed, invalidFrame) = ParseFramesFromBuffer(_recvBuf, _recvPos);
+            result.AddRange(parsed);
+
+            if (invalidFrame)
             {
-                int payloadLen = BitConverter.ToInt32(_recvBuf, offset);
-                if (payloadLen < 0 || payloadLen > 1_000_000)
+                DropClient();
+                return result;
+            }
+
+            // Compact buffer: shift unconsumed bytes to front
+            if (consumed > 0)
+            {
+                int remaining = _recvPos - consumed;
+                if (remaining > 0)
+                    Buffer.BlockCopy(_recvBuf, consumed, _recvBuf, 0, remaining);
+                _recvPos = remaining;
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Parses complete length-prefixed frames from a raw buffer.
+        /// Returns the parsed commands, the number of bytes consumed, and a flag
+        /// indicating whether an invalid frame length was encountered (caller
+        /// should drop the client when true).
+        ///
+        /// Internal and static so that unit tests can exercise the guard logic
+        /// without a live socket.
+        /// </summary>
+        internal static (List<VMNetCommand> commands, int consumed, bool invalidFrame)
+            ParseFramesFromBuffer(byte[] buf, int pos)
+        {
+            var commands = new List<VMNetCommand>();
+            int offset = 0;
+
+            while (offset + 4 <= pos)
+            {
+                int payloadLen = BitConverter.ToInt32(buf, offset);
+                if (payloadLen <= 0 || payloadLen > 1_000_000)
                 {
                     Console.Error.WriteLine($"[VMIPCDriver] Invalid frame length {payloadLen}, dropping client.");
-                    DropClient();
-                    return result;
+                    return (commands, offset, true);
                 }
 
-                if (offset + 4 + payloadLen > _recvPos)
+                if (offset + 4 + payloadLen > pos)
                     break; // incomplete frame, wait for more data
 
                 try
                 {
-                    using (var ms = new MemoryStream(_recvBuf, offset + 4, payloadLen, writable: false))
+                    using (var ms = new MemoryStream(buf, offset + 4, payloadLen, writable: false))
                     using (var reader = new BinaryReader(ms))
                     {
                         var cmd = new VMNetCommand();
                         cmd.Deserialize(reader);
-                        result.Add(cmd);
+                        commands.Add(cmd);
                     }
                 }
                 catch (Exception ex)
@@ -249,16 +283,7 @@ namespace FSO.SimAntics.NetPlay.Drivers
                 offset += 4 + payloadLen;
             }
 
-            // Compact buffer: shift unconsumed bytes to front
-            if (offset > 0)
-            {
-                int remaining = _recvPos - offset;
-                if (remaining > 0)
-                    Buffer.BlockCopy(_recvBuf, offset, _recvBuf, 0, remaining);
-                _recvPos = remaining;
-            }
-
-            return result;
+            return (commands, offset, false);
         }
 
         private void SendAck(uint tickId, uint commandCount, ulong randomSeed)
