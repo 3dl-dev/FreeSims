@@ -684,3 +684,95 @@ func TestPerception_Relationships_MultiEntryRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// --- DialogEvent tests (reeims-9be) ---
+
+func TestDialogEvent_JSONRoundTrip_AllFields(t *testing.T) {
+	// Verify that a dialog event JSON frame can be unmarshalled into DialogEvent
+	// with all required fields populated correctly.
+	raw := []byte(`{"type":"dialog","dialog_id":7,"sim_persist_id":42,"title":"Hungry?","text":"You are hungry.","buttons":["Yes","No"]}`)
+
+	var de DialogEvent
+	if err := json.Unmarshal(raw, &de); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	if de.Type != "dialog" {
+		t.Errorf("Type = %q, want dialog", de.Type)
+	}
+	if de.DialogID != 7 {
+		t.Errorf("DialogID = %d, want 7", de.DialogID)
+	}
+	if de.SimPersistID != 42 {
+		t.Errorf("SimPersistID = %d, want 42", de.SimPersistID)
+	}
+	if de.Title != "Hungry?" {
+		t.Errorf("Title = %q, want Hungry?", de.Title)
+	}
+	if de.Text != "You are hungry." {
+		t.Errorf("Text = %q, want You are hungry.", de.Text)
+	}
+	if len(de.Buttons) != 2 {
+		t.Fatalf("len(Buttons) = %d, want 2", len(de.Buttons))
+	}
+	if de.Buttons[0] != "Yes" {
+		t.Errorf("Buttons[0] = %q, want Yes", de.Buttons[0])
+	}
+	if de.Buttons[1] != "No" {
+		t.Errorf("Buttons[1] = %q, want No", de.Buttons[1])
+	}
+}
+
+func TestDialogEvent_JSONRoundTrip_EmptyButtons(t *testing.T) {
+	raw := []byte(`{"type":"dialog","dialog_id":1,"sim_persist_id":0,"title":"Info","text":"Done.","buttons":[]}`)
+	var de DialogEvent
+	if err := json.Unmarshal(raw, &de); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+	if len(de.Buttons) != 0 {
+		t.Errorf("len(Buttons) = %d, want 0", len(de.Buttons))
+	}
+}
+
+func TestDialogEvent_JSONRoundTrip_ThreeButtons(t *testing.T) {
+	raw := []byte(`{"type":"dialog","dialog_id":2,"sim_persist_id":5,"title":"Choice","text":"Pick one.","buttons":["Yes","No","Cancel"]}`)
+	var de DialogEvent
+	if err := json.Unmarshal(raw, &de); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+	if len(de.Buttons) != 3 {
+		t.Fatalf("len(Buttons) = %d, want 3", len(de.Buttons))
+	}
+	if de.Buttons[2] != "Cancel" {
+		t.Errorf("Buttons[2] = %q, want Cancel", de.Buttons[2])
+	}
+}
+
+func TestDialogEvent_MarshalRoundTrip(t *testing.T) {
+	// Verify marshal → unmarshal preserves all fields.
+	original := DialogEvent{
+		Type:         "dialog",
+		DialogID:     99,
+		SimPersistID: 77,
+		Title:        "Say \"hello\"",
+		Text:         "Line1\nLine2",
+		Buttons:      []string{"Yes", "No"},
+	}
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got DialogEvent
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.DialogID != original.DialogID {
+		t.Errorf("DialogID = %d, want %d", got.DialogID, original.DialogID)
+	}
+	if got.Title != original.Title {
+		t.Errorf("Title = %q, want %q", got.Title, original.Title)
+	}
+	if got.Text != original.Text {
+		t.Errorf("Text = %q, want %q", got.Text, original.Text)
+	}
+}

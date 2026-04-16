@@ -160,3 +160,21 @@ type PathfindFailed struct {
 	TargetObjectID int    `json:"target_object_id"` // 0 when no specific target
 	Reason         string `json:"reason"`
 }
+
+// DialogEvent is the JSON structure sent by the game when a Sim receives a
+// dialog box (reeims-9be). The agent should respond with a dialog-response
+// command matching the dialog_id.
+//
+// buttons contains only the non-null button labels in order: Yes, No, Cancel.
+// An empty buttons array means the dialog is a notification (no choice required).
+//
+// sim_persist_id identifies the Sim whose thread is blocked waiting for the
+// dialog response.
+type DialogEvent struct {
+	Type         string   `json:"type"`           // always "dialog"
+	DialogID     int      `json:"dialog_id"`
+	SimPersistID uint32   `json:"sim_persist_id"`
+	Title        string   `json:"title"`
+	Text         string   `json:"text"`
+	Buttons      []string `json:"buttons"`
+}

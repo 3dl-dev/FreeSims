@@ -27,6 +27,7 @@ const (
 	CmdMoveObject        VMCommandType = 8
 	CmdDeleteObject      VMCommandType = 9
 	CmdGoto              VMCommandType = 10
+	CmdDialogResponse    VMCommandType = 11
 	CmdChangeLotSize     VMCommandType = 25
 	CmdSendToInventory   VMCommandType = 21
 	CmdPlaceInventory    VMCommandType = 22
@@ -650,4 +651,57 @@ func (c *QueryInventoryCmd) Serialize(buf *bytes.Buffer) error {
 	writeActorUID(buf, c.ActorUID)
 	writeRequestIDTail(buf, c.RequestID)
 	return nil
+}
+
+// --- DialogResponse command (reeims-9be) ---
+//
+// DialogResponseCmd sends a dialog response from an agent to a Sim whose thread
+// is blocked waiting for user input. The game emitted a "dialog" event frame
+// with a dialog_id; the agent responds with this command, passing dialog_id as
+// ActorUID so VMIPCDriver can look up the caller PersistID and dispatch the
+// VMNetDialogResponseCmd with the correct ActorUID.
+//
+// Wire format (after VMCommandType byte):
+//
+//	[ActorUID: 4 bytes LE]    — carries dialog_id (NOT the caller's PersistID)
+//	[ResponseCode: 1 byte]    — 0=yes/ok, 1=no, 2=cancel
+//	[ResponseText: 7-bit-length-prefixed UTF-8 string]  — empty for button dialogs
+//
+// VMCommandType byte: 11 (mirrors C# VMCommandType.DialogResponse)
+//
+// button is a human-readable label matching one of the buttons in the dialog
+// event ("Yes", "No", "Cancel", or whatever label the game provided).
+// It is translated to a ResponseCode by ButtonLabel:
+//
+//	"Yes" or "OK" or "ok" or "yes" → 0
+//	"No"  or "no"                  → 1
+//	"Cancel" or "cancel"            → 2
+//	anything else                   → 0 (default to yes/ok)
+type DialogResponseCmd struct {
+	DialogID     uint32 // passed as ActorUID on the wire; VMIPCDriver maps it to caller
+	ResponseCode byte   // 0=yes/ok, 1=no, 2=cancel
+	ResponseText string // usually empty; free-text input for text-input dialogs
+}
+
+func (c *DialogResponseCmd) CmdType() VMCommandType { return CmdDialogResponse }
+
+func (c *DialogResponseCmd) Serialize(buf *bytes.Buffer) error {
+	// ActorUID carries dialog_id so VMIPCDriver can look up the real caller.
+	writeActorUID(buf, c.DialogID)
+	buf.WriteByte(c.ResponseCode)
+	writeBinaryString(buf, c.ResponseText)
+	return nil
+}
+
+// ButtonLabelToResponseCode converts a button label string to a VMNetDialogResponseCmd
+// ResponseCode byte (0=yes/ok, 1=no, 2=cancel).
+func ButtonLabelToResponseCode(label string) byte {
+	switch label {
+	case "No", "no":
+		return 1
+	case "Cancel", "cancel":
+		return 2
+	default:
+		return 0 // Yes / OK / any other label → 0
+	}
 }

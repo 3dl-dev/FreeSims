@@ -27,6 +27,7 @@ using System.Net.Sockets;
 using System.Text;
 using FSO.SimAntics.Diagnostics;
 using FSO.SimAntics.Engine;
+using FSO.SimAntics.Model;
 using FSO.SimAntics.NetPlay.Model;
 using FSO.SimAntics.NetPlay.Model.Commands;
 using GonzoNet;
@@ -49,6 +50,17 @@ namespace FSO.SimAntics.NetPlay.Drivers
         private uint _tickId;
         private bool _disposed;
 
+        // Dialog tracking: monotonic counter → pending dialog info (caller PersistID + label).
+        // Dialogs are stored until an agent responds or the VM discards them.
+        private int _nextDialogId;
+        private readonly Dictionary<int, PendingDialog> _pendingDialogs = new Dictionary<int, PendingDialog>();
+
+        // Holds enough state to dispatch VMNetDialogResponseCmd on behalf of the caller Sim.
+        private struct PendingDialog
+        {
+            public uint CallerPersistID;
+        }
+
         public VMIPCDriver()
         {
             // Remove stale socket file
@@ -63,6 +75,21 @@ namespace FSO.SimAntics.NetPlay.Drivers
             VMRoutingFrame.OnPathfindFailed += HandlePathfindFailed;
 
             Console.WriteLine($"[VMIPCDriver] Listening on {SocketPath}");
+        }
+
+        /// <summary>
+        /// Subscribes to the VM's OnDialog event so that dialog events are
+        /// forwarded to the connected IPC client as JSON frames.
+        /// Must be called after the VM is initialized (i.e. after VM_SetDriver).
+        /// </summary>
+        /// <summary>
+        /// Subscribes to the VM's OnDialog event so that dialog events are
+        /// forwarded to the connected IPC client as JSON frames.
+        /// Must be called after the VM is initialized (i.e. after VM_SetDriver).
+        /// </summary>
+        public void SubscribeToVM(VM vm)
+        {
+            vm.OnDialog += HandleVMDialog;
         }
 
         public override void SendCommand(VMNetCommandBodyAbstract cmd)
@@ -398,6 +425,79 @@ namespace FSO.SimAntics.NetPlay.Drivers
         }
 
         /// <summary>
+        /// Handles vm.OnDialog events: assigns a monotonic dialog_id, stores the
+        /// caller PersistID in _pendingDialogs, and emits a JSON frame to the IPC client.
+        ///
+        /// JSON frame format:
+        ///   {"type":"dialog","dialog_id":N,"sim_persist_id":M,"title":"...","text":"...","buttons":["Yes","No",...]}
+        ///
+        /// buttons contains only the non-null labels from Yes/No/Cancel in order.
+        /// If all are null (a notification-style dialog), buttons is an empty array.
+        /// </summary>
+        private void HandleVMDialog(VMDialogInfo info)
+        {
+            if (_client == null) return;
+
+            // Assign a unique dialog_id (monotonic per driver instance).
+            int dialogId = System.Threading.Interlocked.Increment(ref _nextDialogId);
+
+            // Remember caller so we can resolve ActorUID when the agent responds.
+            uint callerPersistId = info.Caller?.PersistID ?? 0;
+            lock (_pendingDialogs)
+            {
+                _pendingDialogs[dialogId] = new PendingDialog { CallerPersistID = callerPersistId };
+            }
+
+            // Build the buttons array from non-null labels in order: Yes, No, Cancel.
+            var buttons = new System.Text.StringBuilder();
+            buttons.Append('[');
+            bool first = true;
+            if (info.Yes != null)
+            {
+                if (!first) buttons.Append(',');
+                buttons.Append('"').Append(EscapeJsonString(info.Yes)).Append('"');
+                first = false;
+            }
+            if (info.No != null)
+            {
+                if (!first) buttons.Append(',');
+                buttons.Append('"').Append(EscapeJsonString(info.No)).Append('"');
+                first = false;
+            }
+            if (info.Cancel != null)
+            {
+                if (!first) buttons.Append(',');
+                buttons.Append('"').Append(EscapeJsonString(info.Cancel)).Append('"');
+            }
+            buttons.Append(']');
+
+            var titleEsc = EscapeJsonString(info.Title ?? "");
+            var msgEsc = EscapeJsonString(info.Message ?? "");
+
+            var json = $"{{\"type\":\"dialog\",\"dialog_id\":{dialogId},\"sim_persist_id\":{callerPersistId},\"title\":\"{titleEsc}\",\"text\":\"{msgEsc}\",\"buttons\":{buttons}}}";
+            var jsonBytes = Encoding.UTF8.GetBytes(json);
+
+            var frame = new byte[4 + jsonBytes.Length];
+            BitConverter.TryWriteBytes(new Span<byte>(frame, 0, 4), jsonBytes.Length);
+            Buffer.BlockCopy(jsonBytes, 0, frame, 4, jsonBytes.Length);
+
+            SendPerceptionFrame(frame);
+        }
+
+        /// <summary>
+        /// Minimal JSON string escaper for dialog text (title, message, button labels).
+        /// Escapes \, ", newlines, carriage returns, and tabs.
+        /// </summary>
+        private static string EscapeJsonString(string s)
+        {
+            return s.Replace("\\", "\\\\")
+                    .Replace("\"", "\\\"")
+                    .Replace("\n", "\\n")
+                    .Replace("\r", "\\r")
+                    .Replace("\t", "\\t");
+        }
+
+        /// <summary>
         /// Handles VMRoutingFrame.OnPathfindFailed events and emits a JSON frame
         /// to the connected IPC client.
         /// Format: {"type":"pathfind-failed","sim_persist_id":X,"target_object_id":Y,"reason":"..."}
@@ -423,9 +523,36 @@ namespace FSO.SimAntics.NetPlay.Drivers
         /// may shadow an avatar's PersistID. Temporarily reassign the avatar's
         /// PersistID to a collision-free value so internal command lookups
         /// (e.g. VMNetGotoCmd.Execute) find the avatar, not a game object.
+        ///
+        /// Special case: VMNetDialogResponseCmd carries dialog_id in ActorUID (from the
+        /// sidecar). We resolve dialog_id → CallerPersistID from _pendingDialogs before
+        /// the normal avatar lookup.
         /// </summary>
         private void ExecuteIPCCommand(VM vm, VMNetCommand cmd)
         {
+            // Resolve dialog_id → CallerPersistID for dialog-response commands.
+            if (cmd.Command is VMNetDialogResponseCmd)
+            {
+                int dialogId = (int)cmd.Command.ActorUID;
+                PendingDialog pending;
+                bool found;
+                lock (_pendingDialogs)
+                {
+                    found = _pendingDialogs.TryGetValue(dialogId, out pending);
+                    if (found)
+                        _pendingDialogs.Remove(dialogId);
+                }
+
+                if (!found)
+                {
+                    Console.Error.WriteLine($"[VMIPCDriver] dialog-response: unknown dialog_id={dialogId}");
+                    return;
+                }
+
+                // Patch ActorUID to the real caller PersistID before normal dispatch.
+                cmd.Command.ActorUID = pending.CallerPersistID;
+            }
+
             var uid = cmd.Command.ActorUID;
             var avatar = vm.Entities.OfType<VMAvatar>().FirstOrDefault(a => a.PersistID == uid);
             bool success;
