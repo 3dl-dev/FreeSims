@@ -27,10 +27,12 @@ namespace FSO.SimAntics.NetPlay.Model.Commands
 
             if (Message[0] == '/' && Message.Length > 1)
             {
+                // Admin chat commands (/ban, /admin, etc.) require the multiplayer server driver,
+                // which is disabled in this port.
+                return false;
+#if MULTIPLAYER_ADMIN_COMMANDS_DISABLED
                 var spaceIndex = Message.IndexOf(' ');
                 if (spaceIndex == -1) spaceIndex = Message.Length;
-                if ((FromNet && ((VMTSOAvatarState)avatar.TSOState).Permissions < VMTSOAvatarPermissions.Admin) || !(vm.Driver is VMServerDriver)) return false;
-                //commands are only run from the server sim right now
                 var cmd = Message.Substring(1, spaceIndex - 1);
                 var args = Message.Substring(Math.Min(Message.Length, spaceIndex + 1), Math.Max(0, Message.Length - (spaceIndex + 1)));
                 var server = (VMServerDriver)vm.Driver;
@@ -111,6 +113,7 @@ namespace FSO.SimAntics.NetPlay.Model.Commands
                         break;
                 }
                 return true;
+#endif
             }
             else
             {
@@ -126,12 +129,14 @@ namespace FSO.SimAntics.NetPlay.Model.Commands
             Message = Message.Substring(0, Math.Min(Message.Length, 200));
             base.SerializeInto(writer);
             writer.Write(Message);
+            SerializeRequestID(writer);
         }
 
         public override void Deserialize(BinaryReader reader)
         {
             base.Deserialize(reader);
             Message = reader.ReadString();
+            DeserializeRequestID(reader);
         }
         #endregion
     }
