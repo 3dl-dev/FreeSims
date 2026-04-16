@@ -557,10 +557,9 @@ class SimAgentV3:
                     for block in message.content:
                         btype = type(block).__name__
                         if btype == "ToolUseBlock":
-                            result = self.handlers.dispatch(block.name, block.input)
-                            tool_uses.append({"tool": block.name, "input": block.input, "result": result})
+                            tool_uses.append({"tool": block.name, "input": block.input})
                             _log(self.log_path, {"event": "turn", "tick": self.tick,
-                                                 "tool": block.name, "args": block.input, "result": result})
+                                                 "tool": block.name, "args": block.input})
                         elif btype == "TextBlock":
                             text_outputs.append(block.text)
                             _log(self.log_path, {"event": "text", "tick": self.tick, "text": block.text})
