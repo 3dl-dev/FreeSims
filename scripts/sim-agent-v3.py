@@ -2,7 +2,8 @@
 """sim-agent-v3.py — Embodied Sim agent via Claude Agent SDK.
 
 Reads perception events (JSONL) from stdin (same sidecar protocol as v2).
-Each perception triggers _call_llm() which invokes the Claude Agent SDK.
+Each perception triggers _call_llm() only when should_think() fires one of 8
+wake triggers (attention controller). Reduces ~600 LLM calls/10-min to ≤30.
 
 Env: SIM_NAME, PERSIST_ID
 Log: /tmp/embodied-agent-<persist_id>.jsonl
@@ -13,7 +14,83 @@ import json
 import os
 import shutil
 import sys
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+
+
+# ---------------------------------------------------------------------------
+# Attention controller — intent state + 8 wake triggers
+# ---------------------------------------------------------------------------
+
+MOTIVE_DELTA_THRESHOLD = 10   # trigger 1
+MOTIVE_LOW_THRESHOLD = 20     # trigger 2
+PERIODIC_TICK_INTERVAL = 60   # trigger 8
+
+
+@dataclass
+class IntentState:
+    """Agent intent between LLM calls. Suppresses redundant wakes."""
+    goal: str = ""; started_at: int = 0; wait_until_tick: int = 0
+    last_llm_tick: int = -PERIODIC_TICK_INTERVAL  # primed: fires on tick 1
+    last_motives: dict = field(default_factory=dict)
+    last_lot_avatars: list = field(default_factory=list)
+
+
+def _motive_keys(p: dict) -> dict: return p.get("motives") or {}
+def _avatar_names(p: dict) -> list: return sorted(a.get("name", "") for a in (p.get("lot_avatars") or []))
+def _events(p: dict) -> list: return p.get("recent_events") or []
+
+
+def should_think(perception: dict, state: IntentState, tick: int) -> tuple[bool, str]:
+    """Pure function — returns (True, trigger_tag) if any of 8 wake triggers fire."""
+    sim_name = perception.get("name", "").lower()
+    motives = _motive_keys(perception)
+    avatars = _avatar_names(perception)
+    evts = _events(perception)
+
+    if state.last_motives:
+        # T1: motive delta
+        for k, v in motives.items():
+            old = state.last_motives.get(k)
+            if old is not None and abs(v - old) >= MOTIVE_DELTA_THRESHOLD:
+                return True, "motive_delta"
+        # T2: threshold cross
+        for k, v in motives.items():
+            old = state.last_motives.get(k)
+            if old is not None and old >= MOTIVE_LOW_THRESHOLD > v:
+                return True, "motive_threshold"
+
+    # T3: avatar list changed
+    if avatars != state.last_lot_avatars:
+        return True, "avatar_change"
+
+    for ev in evts:
+        if not isinstance(ev, dict):
+            continue
+        t = ev.get("type")
+        # T4: chat_received event
+        if t == "chat_received":
+            return True, "chat_received"
+        # T5: pathfind-failed event
+        if t == "pathfind-failed":
+            return True, "pathfind_failed"
+
+    # T6: direct address (name in chat text)
+    if sim_name:
+        for ev in evts:
+            if isinstance(ev, dict) and ev.get("type") == "chat_received":
+                if sim_name in ev.get("text", "").lower():
+                    return True, "direct_address"
+
+    # T7: intent timer elapsed
+    if state.wait_until_tick > 0 and tick >= state.wait_until_tick:
+        return True, "intent_timer"
+
+    # T8: periodic fallback
+    if (tick - state.last_llm_tick) >= PERIODIC_TICK_INTERVAL:
+        return True, "periodic"
+
+    return False, "suppressed"
 
 
 # ---------------------------------------------------------------------------
@@ -95,9 +172,8 @@ class ToolHandlers:
     # --- WIRED: wait ---
     def handle_wait(self, args: dict) -> str:
         seconds = int(args.get("seconds", 5))
-        # Semantic no-op: sets next-wake hint on the agent.
-        # [ATTENTION SEAM] reeims-2d6 will read agent.wait_until_tick to
-        # suppress LLM calls until the wait has elapsed.
+        # [ATTENTION SEAM] sets wait_until_tick on the agent's IntentState.
+        # should_think() trigger 7 reads this to suppress LLM calls until elapsed.
         in_game_ticks = max(1, seconds)
         self.agent.wait_until_tick = self.agent.tick + in_game_ticks
         return f"waiting {seconds}s (in-game)"
@@ -249,9 +325,18 @@ class SimAgentV3:
         self.tick: int = 0
         self.last_perception: dict | None = None
         self.memories: list[str] = []    # [MEMORY SEAM] reeims-dd0 compaction goes here
-        self.wait_until_tick: int = 0    # [ATTENTION SEAM] reeims-2d6 reads this
+        self.intent: IntentState = IntentState()
         self.log_path: str = f"/tmp/embodied-agent-{PERSIST_ID_ENV or 'unknown'}.jsonl"
         self.handlers = ToolHandlers(self)
+
+    @property
+    def wait_until_tick(self) -> int:
+        """[ATTENTION SEAM] reeims-2d6 — proxy to intent.wait_until_tick."""
+        return self.intent.wait_until_tick
+
+    @wait_until_tick.setter
+    def wait_until_tick(self, value: int) -> None:
+        self.intent.wait_until_tick = value
 
     def _build_perception_message(self, perception: dict) -> str:
         """Format a perception as the user message to Claude."""
@@ -334,13 +419,26 @@ class SimAgentV3:
             self.log_path,
             {"event": "perception", "tick": self.tick, "clock": data.get("clock"), "motives": data.get("motives")},
         )
+
+        # [ATTENTION SEAM] — gate LLM calls via should_think()
+        wake, reason = should_think(data, self.intent, self.tick)
+        if not wake:
+            _log(self.log_path, {"event": "attention_skip", "tick": self.tick, "reason": reason})
+            return
+
+        # Update intent state snapshots before LLM call
+        self.intent.last_llm_tick = self.tick
+        self.intent.last_motives = dict(_motive_keys(data))
+        self.intent.last_lot_avatars = _avatar_names(data)
+        # Reset timer after it fires so it doesn't re-trigger immediately
+        if reason == "intent_timer":
+            self.intent.wait_until_tick = 0
+
+        _log(self.log_path, {"event": "attention_wake", "tick": self.tick, "trigger": reason})
         asyncio.run(self._call_llm(data))
 
-    def on_response(self, data: dict) -> None:
-        _log(self.log_path, {"event": "ipc_in", "frame": data})
-
-    def on_dialog(self, data: dict) -> None:
-        _log(self.log_path, {"event": "ipc_in", "frame": data})
+    def on_response(self, data: dict) -> None: _log(self.log_path, {"event": "ipc_in", "frame": data})
+    def on_dialog(self, data: dict) -> None: _log(self.log_path, {"event": "ipc_in", "frame": data})
 
     def on_pathfind_failed(self, data: dict) -> None:
         _log(self.log_path, {"event": "ipc_in", "frame": data})

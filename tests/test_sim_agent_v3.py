@@ -56,6 +56,7 @@ def _safe_load():
 _mod = _safe_load()
 SimAgentV3 = _mod.SimAgentV3
 ToolHandlers = _mod.ToolHandlers
+IntentState = _mod.IntentState
 
 
 # ---------------------------------------------------------------------------
@@ -75,6 +76,7 @@ def agent():
         "lot_avatars": [{"name": "Gerry", "persist_id": 99}],
     }
     a.memories = []
+    a.intent = IntentState()
     a.wait_until_tick = 0
     a.log_path = "/tmp/test-agent-42.jsonl"
     a.handlers = ToolHandlers(a)
