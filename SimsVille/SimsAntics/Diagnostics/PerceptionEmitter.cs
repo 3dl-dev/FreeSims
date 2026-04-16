@@ -96,6 +96,29 @@ namespace FSO.SimAntics.Diagnostics
 
             var clock = vm.Context.Clock;
 
+            // Other avatars on the lot, excluding self (reeims-d37)
+            var lotAvatars = vm.Entities
+                .OfType<VMAvatar>()
+                .Where(a => a.PersistID != avatar.PersistID)
+                .Select(a => new
+                {
+                    persist_id = a.PersistID,
+                    name = a.ToString(),
+                    position = new { x = (int)a.Position.x, y = (int)a.Position.y, level = (int)a.Position.Level },
+                    current_animation = a.CurrentAnimationState?.Anim?.Name ?? "",
+                    motives = new
+                    {
+                        hunger = a.GetMotiveData(VMMotive.Hunger),
+                        comfort = a.GetMotiveData(VMMotive.Comfort),
+                        energy = a.GetMotiveData(VMMotive.Energy),
+                        hygiene = a.GetMotiveData(VMMotive.Hygiene),
+                        bladder = a.GetMotiveData(VMMotive.Bladder),
+                        social = a.GetMotiveData(VMMotive.Social),
+                        fun = a.GetMotiveData(VMMotive.Fun),
+                        mood = a.GetMotiveData(VMMotive.Mood),
+                    },
+                }).ToList();
+
             return new
             {
                 type = "perception",
@@ -134,6 +157,7 @@ namespace FSO.SimAntics.Diagnostics
                     priority = (int)a.Priority,
                 }).ToList(),
                 nearby_objects = nearbyObjects,
+                lot_avatars = lotAvatars,
             };
         }
     }

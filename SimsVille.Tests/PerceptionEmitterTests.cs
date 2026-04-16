@@ -25,6 +25,7 @@
 // a VMAvatar-backed test can replace or supplement this one.
 
 using System;
+using System.Collections.Generic;
 using System.Text.Json;
 using Xunit;
 
@@ -66,7 +67,25 @@ namespace SimsVille.Tests
                 "rotation": 0.0,
                 "current_animation": "walk",
                 "action_queue": [],
-                "nearby_objects": []
+                "nearby_objects": [],
+                "lot_avatars": [
+                    {
+                        "persist_id": 2,
+                        "name": "Bob",
+                        "position": { "x": 5, "y": 7, "level": 1 },
+                        "current_animation": "idle",
+                        "motives": {
+                            "hunger": -50,
+                            "comfort": 30,
+                            "energy": 60,
+                            "hygiene": 20,
+                            "bladder": -10,
+                            "social": 40,
+                            "fun": 55,
+                            "mood": 25
+                        }
+                    }
+                ]
             }
             """;
 
@@ -200,18 +219,94 @@ namespace SimsVille.Tests
                 "day_of_week must not appear in clock — VMClock does not track it");
         }
 
-        // Minimal DTO mirroring the perception JSON shape (funds + clock fields).
+        // ── LotAvatars tests (reeims-d37) ──────────────────────────────────────
+
+        [Fact]
+        public void PerceptionJson_ContainsLotAvatarsField()
+        {
+            using var doc = JsonDocument.Parse(SamplePerceptionJson);
+            Assert.True(doc.RootElement.TryGetProperty("lot_avatars", out var elem),
+                "perception JSON must contain a 'lot_avatars' property");
+            Assert.Equal(JsonValueKind.Array, elem.ValueKind);
+        }
+
+        [Fact]
+        public void LotAvatars_Shape_HasRequiredFields()
+        {
+            using var doc = JsonDocument.Parse(SamplePerceptionJson);
+            var lotAvatars = doc.RootElement.GetProperty("lot_avatars");
+
+            Assert.True(lotAvatars.GetArrayLength() > 0, "sample JSON must have at least one lot_avatar");
+            var avatar = lotAvatars[0];
+
+            Assert.True(avatar.TryGetProperty("persist_id", out _),        "lot_avatar must have 'persist_id'");
+            Assert.True(avatar.TryGetProperty("name", out _),               "lot_avatar must have 'name'");
+            Assert.True(avatar.TryGetProperty("position", out var pos),     "lot_avatar must have 'position'");
+            Assert.True(avatar.TryGetProperty("current_animation", out _),  "lot_avatar must have 'current_animation'");
+            Assert.True(avatar.TryGetProperty("motives", out var motives),  "lot_avatar must have 'motives'");
+
+            // Position sub-fields
+            Assert.True(pos.TryGetProperty("x", out _),     "lot_avatar.position must have 'x'");
+            Assert.True(pos.TryGetProperty("y", out _),     "lot_avatar.position must have 'y'");
+            Assert.True(pos.TryGetProperty("level", out _), "lot_avatar.position must have 'level'");
+
+            // Motives sub-fields (reeims-d37 spec: hunger,comfort,energy,hygiene,bladder,social,fun,mood)
+            foreach (var field in new[] { "hunger", "comfort", "energy", "hygiene", "bladder", "social", "fun", "mood" })
+            {
+                Assert.True(motives.TryGetProperty(field, out _),
+                    $"lot_avatar.motives must have '{field}'");
+            }
+        }
+
+        [Fact]
+        public void LotAvatars_ExcludesSelf_ByPersistID()
+        {
+            // Self persist_id is 1 (Daisy). Bob's is 2. Verify self is not in lot_avatars.
+            var dto = JsonSerializer.Deserialize<PerceptionDto>(SamplePerceptionJson,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            Assert.NotNull(dto);
+
+            uint selfId = dto.PersistId;
+            foreach (var la in dto.LotAvatars)
+            {
+                Assert.NotEqual(selfId, la.PersistId);
+            }
+        }
+
+        [Fact]
+        public void LotAvatars_MotivesValues_AreCorrect()
+        {
+            using var doc = JsonDocument.Parse(SamplePerceptionJson);
+            var motives = doc.RootElement.GetProperty("lot_avatars")[0].GetProperty("motives");
+
+            Assert.Equal(-50, motives.GetProperty("hunger").GetInt32());
+            Assert.Equal(30,  motives.GetProperty("comfort").GetInt32());
+            Assert.Equal(60,  motives.GetProperty("energy").GetInt32());
+            Assert.Equal(20,  motives.GetProperty("hygiene").GetInt32());
+            Assert.Equal(-10, motives.GetProperty("bladder").GetInt32());
+            Assert.Equal(40,  motives.GetProperty("social").GetInt32());
+            Assert.Equal(55,  motives.GetProperty("fun").GetInt32());
+            Assert.Equal(25,  motives.GetProperty("mood").GetInt32());
+        }
+
+        // Minimal DTO mirroring the perception JSON shape (funds + clock + lot_avatars fields).
         // Uses JsonPropertyName to match the snake_case keys emitted by PerceptionEmitter.
         private sealed class PerceptionDto
         {
             [System.Text.Json.Serialization.JsonPropertyName("type")]
             public string Type { get; set; }
 
+            [System.Text.Json.Serialization.JsonPropertyName("persist_id")]
+            public uint PersistId { get; set; }
+
             [System.Text.Json.Serialization.JsonPropertyName("funds")]
             public int Funds { get; set; }
 
             [System.Text.Json.Serialization.JsonPropertyName("clock")]
             public ClockDto Clock { get; set; }
+
+            [System.Text.Json.Serialization.JsonPropertyName("lot_avatars")]
+            public List<LotAvatarDto> LotAvatars { get; set; } = new();
         }
 
         private sealed class ClockDto
@@ -230,6 +325,15 @@ namespace SimsVille.Tests
 
             [System.Text.Json.Serialization.JsonPropertyName("day")]
             public int Day { get; set; }
+        }
+
+        private sealed class LotAvatarDto
+        {
+            [System.Text.Json.Serialization.JsonPropertyName("persist_id")]
+            public uint PersistId { get; set; }
+
+            [System.Text.Json.Serialization.JsonPropertyName("name")]
+            public string Name { get; set; }
         }
     }
 }
