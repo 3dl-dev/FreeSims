@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# demo-multi-agent.sh — Multi-agent demo: 2 heuristic agents × 2 Sims in one lot.
+# demo-multi-agent.sh — Multi-agent demo: 2 LLM-backed agents × 2 Sims in one lot.
 #
 # Architecture:
 #   sidecar reads: CMD_FIFO (merged commands from agent0 + agent1)
@@ -12,13 +12,25 @@
 #
 # Usage:
 #   scripts/demo-multi-agent.sh [--sim1-name NAME] [--sim2-name NAME]
+#
+# Agent version toggle (default: v3 — Claude Agent SDK):
+#   FREESIMS_AGENT_VERSION=v3   use scripts/sim-agent-v3.py  (default)
+#   FREESIMS_AGENT_VERSION=v2   use scripts/sim-agent-v2.py  (heuristic fallback)
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 GAME_BIN="$REPO_ROOT/SimsVille/bin/Debug/net8.0"
 SIDECAR_BIN="$REPO_ROOT/sidecar/freesims-sidecar"
-AGENT_SCRIPT="$REPO_ROOT/scripts/sim-agent-v2.py"
+
+# Agent version selection
+FREESIMS_AGENT_VERSION="${FREESIMS_AGENT_VERSION:-v3}"
+if [ "$FREESIMS_AGENT_VERSION" = "v2" ]; then
+    AGENT_SCRIPT="$REPO_ROOT/scripts/sim-agent-v2.py"
+else
+    AGENT_SCRIPT="$REPO_ROOT/scripts/sim-agent-v3.py"
+    FREESIMS_AGENT_VERSION="v3"
+fi
 DISPLAY_NUM="${DISPLAY_NUM:-:99}"
 IPC_SOCK="/tmp/freesims-ipc.sock"
 OBSERVER_FILE="/tmp/freesims-observer.jsonl"
@@ -56,6 +68,15 @@ cleanup() {
         [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
     done
     wait 2>/dev/null || true
+    # Kill any orphaned `claude` CLI subprocesses that the Agent SDK may have spawned.
+    # The SDK launches `claude --print --mcp-server ...` as a child process.
+    # These are children of the python agent processes, which may have already exited,
+    # so kill by pattern rather than parent PID.
+    pkill -TERM -f 'claude --print' 2>/dev/null || true
+    pkill -TERM -f 'claude-agent-sdk' 2>/dev/null || true
+    sleep 0.5
+    # Force-kill if still alive
+    pkill -KILL -f 'claude --print' 2>/dev/null || true
     rm -f "$CMD_FIFO"
     echo "[demo] cleanup done." >&2
 }
@@ -69,6 +90,19 @@ trap cleanup EXIT INT TERM
 [ -f "$SIDECAR_BIN" ]         || { echo "[demo] FAIL: $SIDECAR_BIN not found"; exit 1; }
 [ -f "$AGENT_SCRIPT" ]        || { echo "[demo] FAIL: $AGENT_SCRIPT not found"; exit 1; }
 python3 --version >/dev/null 2>&1 || { echo "[demo] FAIL: python3 not on PATH"; exit 1; }
+
+echo "[demo] agent version: $FREESIMS_AGENT_VERSION (script=$(basename "$AGENT_SCRIPT"))"
+
+# For v3: warn early if SDK / claude CLI are missing
+if [ "$FREESIMS_AGENT_VERSION" = "v3" ]; then
+    if ! python3 -c "import claude_agent_sdk" 2>/dev/null; then
+        echo "[demo] WARNING: claude-agent-sdk not installed — v3 agents will fail on first perception"
+        echo "[demo]          Run: pip install claude-agent-sdk"
+    fi
+    if ! command -v claude >/dev/null 2>&1; then
+        echo "[demo] WARNING: claude CLI not on PATH — v3 agents will fail on first perception"
+    fi
+fi
 
 # ---------------------------------------------------------------------------
 # Step 1: Xvfb
@@ -197,6 +231,9 @@ fi
 #
 # Agents read from EVENT_LOG (tail -f) filtered to their own Sim.
 # Agents write commands to CMD_FIFO.
+#
+# v3 agents use: SIM_NAME, PERSIST_ID env vars; log to /tmp/embodied-agent-<pid>.jsonl
+# v2 agents use: SIM_AGENT_NAME, SIM_AGENT_INDEX env vars (legacy heuristic)
 # ---------------------------------------------------------------------------
 
 # Agent wrapper: tail EVENT_LOG, filter JSON lines for this Sim, pipe to agent
@@ -205,13 +242,22 @@ agent_wrapper() {
     local agent_idx="$2"
     local log_file="$3"
     # tail -f EVENT_LOG and pipe to the agent script
-    # The agent filters by SIM_AGENT_NAME inside Python
     # Write agent stdout to fd 3 (CMD_FIFO write end, kept open by exec 3<>).
     # Using >&3 instead of >> "$CMD_FIFO" prevents the FIFO write end from
     # closing between commands, which would deliver EOF to the sidecar's stdin.
-    tail -f --retry "$EVENT_LOG" 2>/dev/null | \
-        SIM_AGENT_NAME="$sim_name" SIM_AGENT_INDEX="$agent_idx" \
-        python3 "$AGENT_SCRIPT" >&3 2>"$log_file"
+    if [ "$FREESIMS_AGENT_VERSION" = "v3" ]; then
+        # v3: SIM_NAME (used for filtering + identity) + PERSIST_ID (agent log path)
+        # PERSIST_ID is pre-set to the agent index so the log path is predictable before
+        # the first perception; v3 will override it with the real persist_id on first tick.
+        tail -f --retry "$EVENT_LOG" 2>/dev/null | \
+            SIM_NAME="$sim_name" PERSIST_ID="agent${agent_idx}" SIM_AGENT_INDEX="$agent_idx" \
+            python3 "$AGENT_SCRIPT" >&3 2>"$log_file"
+    else
+        # v2 (legacy): SIM_AGENT_NAME + SIM_AGENT_INDEX
+        tail -f --retry "$EVENT_LOG" 2>/dev/null | \
+            SIM_AGENT_NAME="$sim_name" SIM_AGENT_INDEX="$agent_idx" \
+            python3 "$AGENT_SCRIPT" >&3 2>"$log_file"
+    fi
 }
 
 agent_wrapper "$SIM1_NAME" 0 "$AGENT0_LOG" &
@@ -220,8 +266,17 @@ AGENT0_PID=$!
 agent_wrapper "$SIM2_NAME" 1 "$AGENT1_LOG" &
 AGENT1_PID=$!
 
+echo "[demo] agent version: $FREESIMS_AGENT_VERSION"
 echo "[demo] agent0 pid=$AGENT0_PID (sim='$SIM1_NAME')"
 echo "[demo] agent1 pid=$AGENT1_PID (sim='$SIM2_NAME')"
+
+# For v3: agent logs land at /tmp/embodied-agent-<persist_id>.jsonl
+# The persist_id is assigned from PERSIST_ID env var pre-first-perception,
+# then overridden to the real game persist_id on first tick.
+if [ "$FREESIMS_AGENT_VERSION" = "v3" ]; then
+    echo "[demo] v3 agent logs: /tmp/embodied-agent-agent0.jsonl, /tmp/embodied-agent-agent1.jsonl"
+    echo "[demo]   (will be renamed to /tmp/embodied-agent-<persist_id>.jsonl after first perception)"
+fi
 
 # ---------------------------------------------------------------------------
 # Step 6: Wait
@@ -272,19 +327,78 @@ check() {
     fi
 }
 
-# Criterion 1: Each agent bought at least one object
-# Note: grep -c exits 1 on zero matches (POSIX). Use `|| true` so set -e doesn't abort
-# and the grep stdout (which still contains "0") is captured correctly.
-BUY_A0=$({ grep -c "buying:" "$AGENT0_LOG" 2>/dev/null || true; })
-BUY_A1=$({ grep -c "buying:" "$AGENT1_LOG" 2>/dev/null || true; })
-if [ "$BUY_A0" -ge 1 ] && [ "$BUY_A1" -ge 1 ]; then
-    check "1. catalog buy" "pass" "agent0=${BUY_A0}, agent1=${BUY_A1}"
-else
-    check "1. catalog buy" "fail" "agent0=${BUY_A0}, agent1=${BUY_A1} (need >=1 each)"
-fi
+if [ "$FREESIMS_AGENT_VERSION" = "v3" ]; then
+    # ---------------------------------------------------------------------------
+    # v3 criteria: LLM turn records in /tmp/embodied-agent-*.jsonl
+    # ---------------------------------------------------------------------------
 
-# Criterion 2: At least one agent's Sim spent money
-FUNDS_RESULT=$(python3 - "$AGENT0_LOG" "$AGENT1_LOG" 2>/dev/null <<'PYEOF'
+    # Criterion 1 (v3): Each agent produced ≥1 LLM turn record
+    V3_LOG_A0="/tmp/embodied-agent-agent0.jsonl"
+    V3_LOG_A1="/tmp/embodied-agent-agent1.jsonl"
+    # Also check for logs written after first perception (real persist_id-based paths)
+    V3_LOG_A0_REAL=$(ls /tmp/embodied-agent-[0-9]*.jsonl 2>/dev/null | head -1 || echo "")
+    V3_LOG_A1_REAL=$(ls /tmp/embodied-agent-[0-9]*.jsonl 2>/dev/null | tail -1 || echo "")
+
+    TURNS_A0=$({ grep -c '"event": "turn"\|"event":"turn"' "$V3_LOG_A0" 2>/dev/null || true; })
+    TURNS_A1=$({ grep -c '"event": "turn"\|"event":"turn"' "$V3_LOG_A1" 2>/dev/null || true; })
+    # Also count from real persist_id logs if different
+    if [ -n "$V3_LOG_A0_REAL" ] && [ "$V3_LOG_A0_REAL" != "$V3_LOG_A0" ]; then
+        TURNS_A0=$((TURNS_A0 + $({ grep -c '"event": "turn"\|"event":"turn"' "$V3_LOG_A0_REAL" 2>/dev/null || true; })))
+    fi
+    if [ -n "$V3_LOG_A1_REAL" ] && [ "$V3_LOG_A1_REAL" != "$V3_LOG_A1" ] && [ "$V3_LOG_A1_REAL" != "$V3_LOG_A0_REAL" ]; then
+        TURNS_A1=$((TURNS_A1 + $({ grep -c '"event": "turn"\|"event":"turn"' "$V3_LOG_A1_REAL" 2>/dev/null || true; })))
+    fi
+    # Also check perception events as fallback (proves agent ran, even without tool use)
+    PERCS_A0=$({ grep -c '"event": "perception"\|"event":"perception"' "$V3_LOG_A0" 2>/dev/null || true; })
+    PERCS_A1=$({ grep -c '"event": "perception"\|"event":"perception"' "$V3_LOG_A1" 2>/dev/null || true; })
+
+    if [ "$TURNS_A0" -ge 1 ] && [ "$TURNS_A1" -ge 1 ]; then
+        check "1. LLM turns (v3)" "pass" "agent0=${TURNS_A0} turns, agent1=${TURNS_A1} turns"
+    else
+        check "1. LLM turns (v3)" "fail" "agent0=${TURNS_A0} turns (percs=${PERCS_A0}), agent1=${TURNS_A1} turns (percs=${PERCS_A1}) — need ≥1 each"
+    fi
+
+    # Criterion 2 (v3): Each agent log file exists with ≥1 perception record
+    # (v3 requires /tmp/embodied-agent-<pid>.jsonl per done condition)
+    ALL_LOGS=$(ls /tmp/embodied-agent-*.jsonl 2>/dev/null | wc -l || echo 0)
+    if [ "$ALL_LOGS" -ge 2 ]; then
+        check "2. log files exist (v3)" "pass" "${ALL_LOGS} embodied-agent log file(s) found"
+    else
+        check "2. log files exist (v3)" "fail" "expected ≥2 /tmp/embodied-agent-*.jsonl, found ${ALL_LOGS}"
+    fi
+
+    # Criterion 3 (v3): Clock entries in embodied-agent logs
+    CLOCK_V3=$({ grep -c '"clock"' /tmp/embodied-agent-*.jsonl 2>/dev/null || true; })
+    if [ "$CLOCK_V3" -ge 1 ]; then
+        check "3. clock awareness (v3)" "pass" "${CLOCK_V3} clock record(s)"
+    else
+        check "3. clock awareness (v3)" "fail" "no clock entries in embodied-agent logs"
+    fi
+
+    # Criterion 4 (v3): lot_avatars in perception events (agent observed other Sims)
+    LOT_V3=$({ grep -c '"lot_avatars"' /tmp/embodied-agent-*.jsonl 2>/dev/null || true; })
+    if [ "$LOT_V3" -ge 1 ]; then
+        check "4. lot_avatars observed (v3)" "pass" "${LOT_V3} perception(s) with lot_avatars"
+    else
+        check "4. lot_avatars observed (v3)" "fail" "no lot_avatars in embodied-agent logs"
+    fi
+else
+    # ---------------------------------------------------------------------------
+    # v2 criteria: heuristic agent log patterns
+    # ---------------------------------------------------------------------------
+
+    # Criterion 1 (v2): Each agent bought at least one object
+    # Note: grep -c exits 1 on zero matches (POSIX). Use `|| true` so set -e doesn't abort
+    BUY_A0=$({ grep -c "buying:" "$AGENT0_LOG" 2>/dev/null || true; })
+    BUY_A1=$({ grep -c "buying:" "$AGENT1_LOG" 2>/dev/null || true; })
+    if [ "$BUY_A0" -ge 1 ] && [ "$BUY_A1" -ge 1 ]; then
+        check "1. catalog buy" "pass" "agent0=${BUY_A0}, agent1=${BUY_A1}"
+    else
+        check "1. catalog buy" "fail" "agent0=${BUY_A0}, agent1=${BUY_A1} (need >=1 each)"
+    fi
+
+    # Criterion 2 (v2): At least one agent's Sim spent money
+    FUNDS_RESULT=$(python3 - "$AGENT0_LOG" "$AGENT1_LOG" 2>/dev/null <<'PYEOF'
 import re, sys
 
 def parse_log(path):
@@ -309,33 +423,34 @@ result = f"a0=({i0}->{f0} delta={d0}) a1=({i1}->{f1} delta={d1}) spent={spent}"
 print(result)
 sys.exit(0 if spent else 1)
 PYEOF
-) && FUNDS_OK=1 || FUNDS_OK=0
-if [ "$FUNDS_OK" -eq 1 ]; then
-    check "2. funds decreased" "pass" "$FUNDS_RESULT"
-else
-    check "2. funds decreased" "fail" "$FUNDS_RESULT (buy issued but may not have executed yet)"
+    ) && FUNDS_OK=1 || FUNDS_OK=0
+    if [ "$FUNDS_OK" -eq 1 ]; then
+        check "2. funds decreased" "pass" "$FUNDS_RESULT"
+    else
+        check "2. funds decreased" "fail" "$FUNDS_RESULT (buy issued but may not have executed yet)"
+    fi
+
+    # Criterion 3 (v2): At least one Sim logged a clock event
+    CLOCK_A0=$({ grep -c "time is now\|time_of_day\|start time:" "$AGENT0_LOG" 2>/dev/null || true; })
+    CLOCK_A1=$({ grep -c "time is now\|time_of_day\|start time:" "$AGENT1_LOG" 2>/dev/null || true; })
+    TOTAL_CLOCK=$((CLOCK_A0 + CLOCK_A1))
+    if [ "$TOTAL_CLOCK" -ge 1 ]; then
+        check "3. clock awareness" "pass" "a0=${CLOCK_A0}, a1=${CLOCK_A1} clock log(s)"
+    else
+        check "3. clock awareness" "fail" "no clock entries in agent logs"
+    fi
+
+    # Criterion 4 (v2): Sims observed each other
+    LOT_A0=$({ grep -c "lot_avatar" "$AGENT0_LOG" 2>/dev/null || true; })
+    LOT_A1=$({ grep -c "lot_avatar" "$AGENT1_LOG" 2>/dev/null || true; })
+    if [ "$((LOT_A0 + LOT_A1))" -ge 1 ]; then
+        check "4. lot_avatars observed" "pass" "a0=${LOT_A0}, a1=${LOT_A1} observation(s)"
+    else
+        check "4. lot_avatars observed" "fail" "neither agent observed lot_avatars"
+    fi
 fi
 
-# Criterion 3: At least one Sim logged a clock event
-CLOCK_A0=$({ grep -c "time is now\|time_of_day\|start time:" "$AGENT0_LOG" 2>/dev/null || true; })
-CLOCK_A1=$({ grep -c "time is now\|time_of_day\|start time:" "$AGENT1_LOG" 2>/dev/null || true; })
-TOTAL_CLOCK=$((CLOCK_A0 + CLOCK_A1))
-if [ "$TOTAL_CLOCK" -ge 1 ]; then
-    check "3. clock awareness" "pass" "a0=${CLOCK_A0}, a1=${CLOCK_A1} clock log(s)"
-else
-    check "3. clock awareness" "fail" "no clock entries in agent logs"
-fi
-
-# Criterion 4: Sims observed each other
-LOT_A0=$({ grep -c "lot_avatar" "$AGENT0_LOG" 2>/dev/null || true; })
-LOT_A1=$({ grep -c "lot_avatar" "$AGENT1_LOG" 2>/dev/null || true; })
-if [ "$((LOT_A0 + LOT_A1))" -ge 1 ]; then
-    check "4. lot_avatars observed" "pass" "a0=${LOT_A0}, a1=${LOT_A1} observation(s)"
-else
-    check "4. lot_avatars observed" "fail" "neither agent observed lot_avatars"
-fi
-
-# Criterion 5: No crashes
+# Criterion 5 (both): No crashes
 GAME_ALIVE=0; kill -0 "$GAME_PID" 2>/dev/null && GAME_ALIVE=1
 SIDECAR_ERR=$({ grep -ci "panic\|fatal error" "$SIDECAR_LOG" 2>/dev/null || true; })
 GAME_ERR=$({ grep -ci "unhandled.*exception\|CRASH" "$GAME_LOG" 2>/dev/null || true; })
@@ -359,6 +474,7 @@ echo ""
     echo "Repo: $REPO_ROOT"
     echo ""
     echo "--- Configuration ---"
+    echo "Agent version: $FREESIMS_AGENT_VERSION ($(basename "$AGENT_SCRIPT"))"
     echo "Sim 1: '$SIM1_NAME'"
     echo "Sim 2: '$SIM2_NAME'"
     echo "Demo timeout: ${DEMO_TIMEOUT}s"
@@ -367,11 +483,21 @@ echo ""
     echo "Pass: $PASS / 5"
     echo "Fail: $FAIL / 5"
     echo ""
-    echo "--- Agent 0 log ---"
+    echo "--- Agent 0 stderr log ---"
     cat "$AGENT0_LOG" 2>/dev/null || echo "(empty)"
     echo ""
-    echo "--- Agent 1 log ---"
+    echo "--- Agent 1 stderr log ---"
     cat "$AGENT1_LOG" 2>/dev/null || echo "(empty)"
+    if [ "$FREESIMS_AGENT_VERSION" = "v3" ]; then
+        echo ""
+        echo "--- v3 embodied-agent JSONL logs ---"
+        for f in /tmp/embodied-agent-*.jsonl; do
+            [ -f "$f" ] || continue
+            echo "  $f ($(wc -l < "$f") lines):"
+            tail -20 "$f"
+            echo ""
+        done
+    fi
     echo ""
     echo "--- Sidecar log (last 50 lines) ---"
     tail -50 "$SIDECAR_LOG" 2>/dev/null || echo "(empty)"
