@@ -25,6 +25,7 @@ using System.IO;
 using System.Linq;
 using System.Net.Sockets;
 using System.Text;
+using FSO.LotView.Model;
 using FSO.SimAntics.Diagnostics;
 using FSO.SimAntics.Engine;
 using FSO.SimAntics.Model;
@@ -93,6 +94,7 @@ namespace FSO.SimAntics.NetPlay.Drivers
         public void SubscribeToVM(VM vm)
         {
             vm.OnDialog += HandleVMDialog;
+            vm.OnChatEvent += (evt) => HandleVMChatEvent(vm, evt);
         }
 
         public override void SendCommand(VMNetCommandBodyAbstract cmd)
@@ -601,6 +603,95 @@ namespace FSO.SimAntics.NetPlay.Drivers
                     .Replace("\n", "\\n")
                     .Replace("\r", "\\r")
                     .Replace("\t", "\\t");
+        }
+
+        /// <summary>
+        /// Maximum L1 tile distance (inclusive) at which a Sim can hear a chat message.
+        /// Earshot = 10 tiles. L1 distance is computed in big-tile coordinates (TileX/TileY).
+        /// </summary>
+        private const int ChatEarshotTiles = 10;
+
+        /// <summary>
+        /// Handles VM.OnChatEvent: when a Sim sends a chat message (VMChatEventType.Message),
+        /// finds all avatars within earshot (L1 tile distance ≤ ChatEarshotTiles) and emits
+        /// a single "chat_received" JSON frame to the IPC client listing all recipients.
+        ///
+        /// JSON frame format:
+        ///   {"type":"chat_received","sender_persist_id":N,"sender_name":"...","text":"...",
+        ///    "recipient_persist_ids":[M,...]}
+        ///
+        /// The sender is excluded from recipient_persist_ids. Recipients are all avatars
+        /// within earshot regardless of whether they are externally controlled.
+        /// OUT_OF_WORLD avatars are excluded (they have no tile position).
+        /// </summary>
+        private void HandleVMChatEvent(VM vm, VMChatEvent evt)
+        {
+            if (_client == null) return;
+            if (evt.Type != VMChatEventType.Message) return;
+
+            // Resolve sender avatar by PersistID.
+            var sender = vm.Entities.OfType<VMAvatar>()
+                .FirstOrDefault(a => a.PersistID == evt.SenderUID);
+            if (sender == null) return;
+            if (sender.Position == LotTilePos.OUT_OF_WORLD) return;
+
+            // Sender tile coordinates (big-tile units, 1 unit = 1 tile)
+            int senderTileX = sender.Position.TileX;
+            int senderTileY = sender.Position.TileY;
+
+            // Message text: VMChatEvent.Text[0] = sender name, Text[1] = message.
+            // Guard against malformed events (e.g. admin commands that return early).
+            if (evt.Text == null || evt.Text.Length < 2) return;
+            string senderName = evt.Text[0] ?? "";
+            string text = evt.Text[1] ?? "";
+
+            // Collect recipients (all avatars within earshot, excluding the sender).
+            var recipients = new List<uint>();
+            foreach (var entity in vm.Entities)
+            {
+                if (entity is not VMAvatar other) continue;
+                if (other.PersistID == sender.PersistID) continue;
+                if (other.Position == LotTilePos.OUT_OF_WORLD) continue;
+
+                int l1 = Math.Abs(other.Position.TileX - senderTileX)
+                        + Math.Abs(other.Position.TileY - senderTileY);
+                if (l1 <= ChatEarshotTiles)
+                    recipients.Add(other.PersistID);
+            }
+
+            // Emit even if recipients is empty — agents may still want to confirm
+            // the chat was processed (e.g. sender's own agent monitoring events).
+            EmitChatReceivedFrame(sender.PersistID, senderName, text, recipients);
+        }
+
+        /// <summary>
+        /// Builds and sends a "chat_received" JSON frame to the IPC client.
+        /// </summary>
+        internal void EmitChatReceivedFrame(uint senderPersistId, string senderName, string text, List<uint> recipientIds)
+        {
+            if (_client == null) return;
+
+            var senderNameEsc = EscapeJsonString(senderName);
+            var textEsc = EscapeJsonString(text);
+
+            // Build recipient_persist_ids JSON array
+            var recipientsJson = new System.Text.StringBuilder();
+            recipientsJson.Append('[');
+            for (int i = 0; i < recipientIds.Count; i++)
+            {
+                if (i > 0) recipientsJson.Append(',');
+                recipientsJson.Append(recipientIds[i]);
+            }
+            recipientsJson.Append(']');
+
+            var json = $"{{\"type\":\"chat_received\",\"sender_persist_id\":{senderPersistId},\"sender_name\":\"{senderNameEsc}\",\"text\":\"{textEsc}\",\"recipient_persist_ids\":{recipientsJson}}}";
+            var jsonBytes = Encoding.UTF8.GetBytes(json);
+
+            var frame = new byte[4 + jsonBytes.Length];
+            BitConverter.TryWriteBytes(new Span<byte>(frame, 0, 4), jsonBytes.Length);
+            Buffer.BlockCopy(jsonBytes, 0, frame, 4, jsonBytes.Length);
+
+            SendPerceptionFrame(frame);
         }
 
         /// <summary>

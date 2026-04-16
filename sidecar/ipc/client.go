@@ -79,7 +79,28 @@ type Client struct {
 	// Agents respond by sending a DialogResponseCmd with the matching dialog_id.
 	DialogCh chan DialogEvent
 
+	// ChatCh receives chat_received events (reeims-7a6).
+	// Each event is emitted by VMIPCDriver when a Sim sends a chat message
+	// and another Sim is within earshot (L1 distance ≤10 tiles).
+	// Fields: sender_persist_id, sender_name, text, recipient_persist_ids.
+	ChatCh chan ChatReceived
+
 	done chan struct{}
+}
+
+// ChatReceived is the JSON structure sent by the game when a Sim hears a chat
+// message from another Sim (reeims-7a6). Earshot is L1 tile distance ≤10.
+//
+// sender_persist_id and sender_name identify the Sim that spoke.
+// text is the chat message (≤200 chars, same limit as the chat command).
+// recipient_persist_ids lists the PersistIDs of all Sims within earshot
+// (excluding the sender). Agent B can listen on ChatCh to observe chat events.
+type ChatReceived struct {
+	Type               string   `json:"type"`                 // always "chat_received"
+	SenderPersistID    uint32   `json:"sender_persist_id"`
+	SenderName         string   `json:"sender_name"`
+	Text               string   `json:"text"`
+	RecipientPersistIDs []uint32 `json:"recipient_persist_ids"`
 }
 
 // NewClient creates a Client that will connect to the given socket path.
@@ -92,6 +113,7 @@ func NewClient(sockPath string) *Client {
 		ResponseCh:       make(chan ResponseFrame, 64),
 		PathfindFailedCh: make(chan PathfindFailed, 64),
 		DialogCh:         make(chan DialogEvent, 64),
+		ChatCh:           make(chan ChatReceived, 64),
 		done:             make(chan struct{}),
 	}
 }
@@ -279,6 +301,17 @@ func (c *Client) dispatchJSONFrame(payload []byte) {
 		case c.DialogCh <- de:
 		default:
 			log.Printf("[ipc] dialog channel full, dropping event dialog_id=%d", de.DialogID)
+		}
+	case "chat_received":
+		var cr ChatReceived
+		if err := json.Unmarshal(payload, &cr); err != nil {
+			log.Printf("[ipc] chat_received frame unmarshal error: %v", err)
+			return
+		}
+		select {
+		case c.ChatCh <- cr:
+		default:
+			log.Printf("[ipc] chat channel full, dropping event sender_persist_id=%d", cr.SenderPersistID)
 		}
 	default:
 		// Forward unknown JSON types to perception channel for backward compat.

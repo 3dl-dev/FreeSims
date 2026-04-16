@@ -932,6 +932,218 @@ func namesOf(avatars []LotAvatar) []string {
 	return out
 }
 
+// ── godMode boundary tests (reeims-5e3) ────────────────────────────────────────
+//
+// Verify that:
+//   - godMode shape (FREESIMS_GOD_MODE=1): LotAvatar.Motives carry real values,
+//     LooksLike is empty.
+//   - Embodied shape (default): LotAvatar.LooksLike is non-empty, Motives zeroed.
+//   - Both shapes round-trip cleanly through json.Marshal/Unmarshal.
+
+const godModePerceptionJSON = `{
+	"type": "perception",
+	"persist_id": 1,
+	"sim_id": 10,
+	"name": "Daisy",
+	"funds": 5000,
+	"clock": {"hours":10,"minutes":0,"seconds":0,"time_of_day":1,"day":2},
+	"motives": {"hunger":-80,"comfort":60,"energy":70,"hygiene":50,"bladder":-30,"room":40,"social":30,"fun":65,"mood":55},
+	"position": {"x":8,"y":8,"level":1},
+	"rotation": 0.0,
+	"current_animation": "idle-stand",
+	"action_queue": [],
+	"nearby_objects": [],
+	"lot_avatars": [
+		{
+			"persist_id": 2,
+			"name": "Bob",
+			"position": {"x":4,"y":6,"level":1},
+			"current_animation": "eat",
+			"motives": {"hunger":10,"comfort":50,"energy":70,"hygiene":60,"bladder":-15,"social":40,"fun":55,"mood":90}
+		}
+	],
+	"skills": {"cooking":0,"charisma":0,"mechanical":0,"creativity":0,"body":0,"logic":0},
+	"job": {"has_job":false,"career":null,"level":0,"salary":0,"work_hours":null},
+	"relationships": []
+}`
+
+const embodiedPerceptionJSON = `{
+	"type": "perception",
+	"persist_id": 1,
+	"sim_id": 10,
+	"name": "Daisy",
+	"funds": 5000,
+	"clock": {"hours":10,"minutes":0,"seconds":0,"time_of_day":1,"day":2},
+	"motives": {"hunger":-80,"comfort":60,"energy":70,"hygiene":50,"bladder":-30,"room":40,"social":30,"fun":65,"mood":55},
+	"position": {"x":8,"y":8,"level":1},
+	"rotation": 0.0,
+	"current_animation": "idle-stand",
+	"action_queue": [],
+	"nearby_objects": [],
+	"lot_avatars": [
+		{
+			"persist_id": 2,
+			"name": "Bob",
+			"position": {"x":4,"y":6,"level":1},
+			"current_animation": "eat",
+			"motives": {"hunger":0,"comfort":0,"energy":0,"hygiene":0,"bladder":0,"social":0,"fun":0,"mood":0},
+			"looks_like": "eating, hungry, cheerful"
+		}
+	],
+	"skills": {"cooking":0,"charisma":0,"mechanical":0,"creativity":0,"body":0,"logic":0},
+	"job": {"has_job":false,"career":null,"level":0,"salary":0,"work_hours":null},
+	"relationships": []
+}`
+
+func TestGodMode_LotAvatar_MotivesPresent_LooksLikeAbsent(t *testing.T) {
+	// godMode shape: Motives carry real values; LooksLike is empty string (omitempty).
+	var p Perception
+	if err := json.Unmarshal([]byte(godModePerceptionJSON), &p); err != nil {
+		t.Fatalf("unmarshal godMode JSON: %v", err)
+	}
+
+	if len(p.LotAvatars) != 1 {
+		t.Fatalf("expected 1 lot_avatar, got %d", len(p.LotAvatars))
+	}
+	a := p.LotAvatars[0]
+
+	if a.Motives.Hunger != 10 {
+		t.Errorf("godMode: expected Motives.Hunger=10, got %d", a.Motives.Hunger)
+	}
+	if a.Motives.Mood != 90 {
+		t.Errorf("godMode: expected Motives.Mood=90, got %d", a.Motives.Mood)
+	}
+	if a.LooksLike != "" {
+		t.Errorf("godMode: expected LooksLike='', got %q", a.LooksLike)
+	}
+}
+
+func TestGodMode_SelfMotives_AlwaysPresent(t *testing.T) {
+	// Self perception: motives always emitted regardless of godMode.
+	var p Perception
+	if err := json.Unmarshal([]byte(godModePerceptionJSON), &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if p.Motives.Hunger != -80 {
+		t.Errorf("self motives: expected Hunger=-80, got %d", p.Motives.Hunger)
+	}
+	if p.Motives.Mood != 55 {
+		t.Errorf("self motives: expected Mood=55, got %d", p.Motives.Mood)
+	}
+}
+
+func TestEmbodied_LotAvatar_LooksLikePresent_MotivesZeroed(t *testing.T) {
+	// Embodied shape: LooksLike is non-empty; Motives are zeroed.
+	var p Perception
+	if err := json.Unmarshal([]byte(embodiedPerceptionJSON), &p); err != nil {
+		t.Fatalf("unmarshal embodied JSON: %v", err)
+	}
+
+	if len(p.LotAvatars) != 1 {
+		t.Fatalf("expected 1 lot_avatar, got %d", len(p.LotAvatars))
+	}
+	a := p.LotAvatars[0]
+
+	if a.LooksLike == "" {
+		t.Errorf("embodied: expected non-empty LooksLike, got empty string")
+	}
+	if len(a.LooksLike) > 60 {
+		t.Errorf("embodied: LooksLike must be ≤60 chars, got %d: %q", len(a.LooksLike), a.LooksLike)
+	}
+	// Motives zeroed in embodied mode
+	if a.Motives.Hunger != 0 || a.Motives.Mood != 0 {
+		t.Errorf("embodied: expected zeroed motives, got Hunger=%d Mood=%d", a.Motives.Hunger, a.Motives.Mood)
+	}
+}
+
+func TestEmbodied_SelfMotives_AlwaysPresent(t *testing.T) {
+	var p Perception
+	if err := json.Unmarshal([]byte(embodiedPerceptionJSON), &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if p.Motives.Hunger != -80 {
+		t.Errorf("self motives: expected Hunger=-80, got %d", p.Motives.Hunger)
+	}
+	if p.Motives.Mood != 55 {
+		t.Errorf("self motives: expected Mood=55, got %d", p.Motives.Mood)
+	}
+}
+
+func TestGodMode_RoundTrip_LooksLikeOmitted(t *testing.T) {
+	// Marshal a godMode LotAvatar (no LooksLike) and verify looks_like is absent
+	// from the JSON output (omitempty).
+	original := LotAvatar{
+		PersistID:        2,
+		Name:             "Bob",
+		Position:         Position{X: 4, Y: 6, Level: 1},
+		CurrentAnimation: "eat",
+		Motives:          LotAvatarMotives{Hunger: 10, Mood: 90},
+		LooksLike:        "", // godMode: not set
+	}
+
+	encoded, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	// looks_like must be absent from JSON (omitempty)
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &raw); err != nil {
+		t.Fatalf("unmarshal to map: %v", err)
+	}
+	if _, present := raw["looks_like"]; present {
+		t.Errorf("godMode: looks_like must be absent (omitempty) when empty, but was present")
+	}
+
+	// Motives preserved
+	var decoded LotAvatar
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if decoded.Motives.Hunger != original.Motives.Hunger {
+		t.Errorf("round-trip Hunger: want %d, got %d", original.Motives.Hunger, decoded.Motives.Hunger)
+	}
+}
+
+func TestEmbodied_RoundTrip_LooksLikePresent(t *testing.T) {
+	// Marshal an embodied LotAvatar (with LooksLike) and verify looks_like appears
+	// in the JSON output and round-trips correctly.
+	original := LotAvatar{
+		PersistID:        3,
+		Name:             "Alice",
+		Position:         Position{X: 2, Y: 3, Level: 1},
+		CurrentAnimation: "walk-to",
+		Motives:          LotAvatarMotives{}, // zeroed
+		LooksLike:        "walking somewhere, tired",
+	}
+
+	encoded, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	// looks_like must be present in JSON
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &raw); err != nil {
+		t.Fatalf("unmarshal to map: %v", err)
+	}
+	if _, present := raw["looks_like"]; !present {
+		t.Errorf("embodied: looks_like must be present in JSON output")
+	}
+
+	// Round-trip
+	var decoded LotAvatar
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if decoded.LooksLike != original.LooksLike {
+		t.Errorf("round-trip LooksLike: want %q, got %q", original.LooksLike, decoded.LooksLike)
+	}
+	if decoded.Motives != (LotAvatarMotives{}) {
+		t.Errorf("embodied: expected zeroed motives after round-trip, got %+v", decoded.Motives)
+	}
+}
+
 func TestDialogEvent_MarshalRoundTrip(t *testing.T) {
 	// Verify marshal → unmarshal preserves all fields.
 	original := DialogEvent{

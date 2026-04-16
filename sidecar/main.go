@@ -196,6 +196,14 @@ func main() {
 		}
 	}()
 
+	// Print chat_received events to stdout as JSONL (reeims-7a6)
+	go func() {
+		for cr := range client.ChatCh {
+			out, _ := json.Marshal(cr)
+			fmt.Println(string(out))
+		}
+	}()
+
 	// Connect (blocks until connected or closed)
 	go func() {
 		if err := client.Connect(); err != nil {
