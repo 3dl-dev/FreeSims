@@ -1,0 +1,14 @@
+{
+  "convention": "freesims",
+  "version": "1.0",
+  "operation": "wait",
+  "description": "Do nothing for a number of ticks. Use this when you have no reason to act right now. One tick ≈ 1 in-game second.",
+  "args": [
+    {"name": "ticks", "type": "integer", "required": false, "min": 1, "max": 120, "description": "How many ticks to wait (default 30, max 120)"}
+  ],
+  "produces_tags": [{"tag": "freesims:wait", "cardinality": "exactly_one"}],
+  "antecedents": "none",
+  "signing": "member_key",
+  "rate_limit": {"max": 60, "per": "sender", "window": "1m"},
+  "response": "sync"
+}

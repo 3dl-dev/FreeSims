@@ -1,0 +1,15 @@
+{
+  "convention": "freesims",
+  "version": "1.0",
+  "operation": "remember",
+  "description": "Store a fact or observation for your future self. Memories persist across perception ticks and are included in your context on future LLM calls. Use this to remember plans, relationships, or anything you want to recall later.",
+  "args": [
+    {"name": "sim_id", "type": "integer", "required": true, "description": "PersistID of the remembering Sim"},
+    {"name": "fact", "type": "string", "required": true, "maxLength": 500, "description": "The fact to remember (≤500 chars)"}
+  ],
+  "produces_tags": [{"tag": "freesims:remember", "cardinality": "exactly_one"}],
+  "antecedents": "none",
+  "signing": "member_key",
+  "rate_limit": {"max": 20, "per": "sender", "window": "1m"},
+  "response": "sync"
+}

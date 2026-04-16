@@ -34,6 +34,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/campfire-net/campfire/pkg/convention"
 	"github.com/campfire-net/campfire/pkg/protocol"
@@ -115,16 +116,20 @@ func StartConventionServer(ctx context.Context, ipcClient *ipc.Client) (lotID st
 	srvCtx, srvCancel := context.WithCancel(ctx)
 
 	handlers := map[string]convention.HandlerFunc{
-		"walk-to":       walkToHandler(ipcClient),
-		"speak":         speakHandler(ipcClient),
-		"interact-with": interactWithHandler(ipcClient),
+		"walk-to":         walkToHandler(ipcClient),
+		"speak":           speakHandler(ipcClient),
+		"interact-with":   interactWithHandler(ipcClient),
+		"wait":            waitHandler(),
+		"remember":        rememberHandler(client, lotID),
+		"query-sim-state": querySimStateHandler(ipcClient),
+		"query-catalog":   queryCatalogHandler(ipcClient),
+		"sim-action":      simActionHandler(ipcClient),
 	}
 
 	for _, decl := range decls {
 		fn, ok := handlers[decl.Operation]
 		if !ok {
-			// Query conventions and sim-action/sim-build are declared but not
-			// served yet — future work.
+			log.Printf("[campfire] no handler for %s — declared but not served", decl.Operation)
 			continue
 		}
 		srv := convention.NewServer(client, decl).
@@ -268,6 +273,155 @@ func interactWithHandler(ipcClient *ipc.Client) convention.HandlerFunc {
 		return okResp(map[string]any{
 			"sim_id": simID, "object_id": objID, "interaction_id": interactionID,
 		}), nil
+	}
+}
+
+// waitHandler returns immediately — the agent chose inaction. No game IPC needed.
+func waitHandler() convention.HandlerFunc {
+	return func(ctx context.Context, req *convention.Request) (*convention.Response, error) {
+		ticks, _ := argInt(req.Args, "ticks")
+		if ticks <= 0 {
+			ticks = 30
+		}
+		return okResp(map[string]any{"waited_ticks": ticks}), nil
+	}
+}
+
+// rememberHandler stores a fact as a tagged message on the lot campfire.
+// The agent (or any future agent resuming this sim) can read these back
+// by filtering for sim:<id> + freesims:memory tags.
+func rememberHandler(cfClient *protocol.Client, lotID string) convention.HandlerFunc {
+	return func(ctx context.Context, req *convention.Request) (*convention.Response, error) {
+		simID, ok := argInt(req.Args, "sim_id")
+		if !ok {
+			return errResp("missing sim_id"), nil
+		}
+		fact, _ := req.Args["fact"].(string)
+		if strings.TrimSpace(fact) == "" {
+			return errResp("fact is empty"), nil
+		}
+		payload, _ := json.Marshal(map[string]any{"sim_id": simID, "fact": fact})
+		_, err := cfClient.Send(protocol.SendRequest{
+			CampfireID: lotID,
+			Payload:    payload,
+			Tags:       []string{"freesims:memory", "sim:" + strconv.FormatInt(simID, 10)},
+		})
+		if err != nil {
+			return errResp("store memory: " + err.Error()), nil
+		}
+		return okResp(map[string]any{"sim_id": simID, "stored": fact}), nil
+	}
+}
+
+// queryWithCorrelation sends an IPC command with a request_id and waits for
+// the correlated response on ipcClient.ResponseCh. Returns the response
+// payload or an error after timeout.
+func queryWithCorrelation(ipcClient *ipc.Client, cmd ipc.Command, requestID string, timeout time.Duration) (map[string]any, error) {
+	frame, err := ipc.SerializeCommand(cmd)
+	if err != nil {
+		return nil, fmt.Errorf("serialize: %w", err)
+	}
+	if err := ipcClient.SendFrame(frame); err != nil {
+		return nil, fmt.Errorf("send: %w", err)
+	}
+
+	deadline := time.After(timeout)
+	for {
+		select {
+		case <-deadline:
+			return nil, fmt.Errorf("timeout waiting for response (request_id=%s)", requestID)
+		case rf, ok := <-ipcClient.ResponseCh:
+			if !ok {
+				return nil, fmt.Errorf("response channel closed")
+			}
+			if rf.RequestID == requestID {
+				return map[string]any{
+					"request_id": rf.RequestID,
+					"status":     rf.Status,
+					"payload":    rf.Payload,
+				}, nil
+			}
+			// Not our response — put it back? Can't easily. Log and continue.
+			log.Printf("[campfire] discarding non-matching response: got %s, want %s", rf.RequestID, requestID)
+		}
+	}
+}
+
+// querySimStateHandler translates query-sim-state into a correlated IPC query.
+func querySimStateHandler(ipcClient *ipc.Client) convention.HandlerFunc {
+	return func(ctx context.Context, req *convention.Request) (*convention.Response, error) {
+		simID, ok := argInt(req.Args, "sim_id")
+		if !ok {
+			return errResp("missing sim_id"), nil
+		}
+		reqID := fmt.Sprintf("qss-%s", req.MessageID[:8])
+		cmd := &ipc.QuerySimStateCmd{SimPersistID: uint32(simID), RequestID: reqID}
+		result, err := queryWithCorrelation(ipcClient, cmd, reqID, 5*time.Second)
+		if err != nil {
+			return errResp(err.Error()), nil
+		}
+		return okResp(result), nil
+	}
+}
+
+// queryCatalogHandler queries the purchasable object catalog.
+func queryCatalogHandler(ipcClient *ipc.Client) convention.HandlerFunc {
+	return func(ctx context.Context, req *convention.Request) (*convention.Response, error) {
+		reqID := fmt.Sprintf("qc-%s", req.MessageID[:8])
+		cmd := &ipc.QueryCatalogCmd{RequestID: reqID}
+		result, err := queryWithCorrelation(ipcClient, cmd, reqID, 10*time.Second)
+		if err != nil {
+			return errResp(err.Error()), nil
+		}
+		return okResp(result), nil
+	}
+}
+
+// simActionHandler is the god-mode dispatcher — accepts any action type and
+// routes through the existing parseCommand logic. Useful as a fallback when
+// the specific convention doesn't exist yet.
+func simActionHandler(ipcClient *ipc.Client) convention.HandlerFunc {
+	return func(ctx context.Context, req *convention.Request) (*convention.Response, error) {
+		action, _ := req.Args["action"].(string)
+		if action == "" {
+			return errResp("missing action"), nil
+		}
+		simID, _ := argInt(req.Args, "sim_id")
+		reqID := fmt.Sprintf("sa-%s", req.MessageID[:8])
+
+		jcmd := jsonCommand{
+			Type:     action,
+			ActorUID: uint32(simID),
+			RequestID: reqID,
+		}
+		// Map remaining args to jsonCommand fields
+		if x, ok := argInt(req.Args, "x"); ok {
+			jcmd.X = int16(x)
+		}
+		if y, ok := argInt(req.Args, "y"); ok {
+			jcmd.Y = int16(y)
+		}
+		if lvl, ok := argInt(req.Args, "level"); ok {
+			jcmd.Level = int8(lvl)
+		}
+		if oid, ok := argInt(req.Args, "target_object_id"); ok {
+			jcmd.TargetID = int16(oid)
+		}
+		if iid, ok := argInt(req.Args, "interaction_id"); ok {
+			jcmd.InteractionID = uint16(iid)
+		}
+		if txt, ok := req.Args["text"].(string); ok {
+			jcmd.Message = txt
+		}
+
+		cmd, err := parseCommand(jcmd)
+		if err != nil {
+			return errResp(err.Error()), nil
+		}
+		if err := sendIPC(ipcClient, cmd); err != nil {
+			return errResp(err.Error()), nil
+		}
+		return okResp(map[string]any{"action": action, "sim_id": simID}), nil
 	}
 }
 
