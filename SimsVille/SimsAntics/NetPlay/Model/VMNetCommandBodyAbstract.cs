@@ -17,6 +17,18 @@ namespace FSO.SimAntics.NetPlay.Model
         public uint ActorUID;
         public bool FromNet = false;
 
+        /// <summary>
+        /// Optional correlation ID set by external agents (e.g. the Go sidecar).
+        /// When non-null, the VM driver echoes a response frame back to the sender
+        /// with a matching request_id so the caller can correlate commands to outcomes.
+        ///
+        /// Wire format: appended LAST in the body, after all type-specific fields:
+        ///   [byte hasRequestID]  — 0 = absent, 1 = present
+        ///   [if present: 7-bit-length-prefixed UTF-8 string]
+        ///
+        /// Null when not supplied (byte 0 at tail).
+        /// </summary>
+        public string RequestID = null;
 
         public virtual bool AcceptFromClient
         {
@@ -31,8 +43,44 @@ namespace FSO.SimAntics.NetPlay.Model
             FromNet = true;
             ActorUID = reader.ReadUInt32();
         }
+
+        /// <summary>
+        /// Reads the optional RequestID tail from the stream.
+        /// Call this AFTER reading all type-specific fields in subclass Deserialize.
+        /// </summary>
+        protected void DeserializeRequestID(BinaryReader reader)
+        {
+            try
+            {
+                if (reader.BaseStream.Position < reader.BaseStream.Length)
+                {
+                    byte hasId = reader.ReadByte();
+                    if (hasId == 1)
+                        RequestID = reader.ReadString(); // BinaryReader.ReadString = 7-bit-length-prefixed
+                }
+            }
+            catch (EndOfStreamException) { /* tail absent — old client */ }
+        }
+
         public virtual void SerializeInto(BinaryWriter writer) {
             writer.Write(ActorUID);
+        }
+
+        /// <summary>
+        /// Writes the optional RequestID tail.
+        /// Call this AFTER writing all type-specific fields in subclass SerializeInto.
+        /// </summary>
+        protected void SerializeRequestID(BinaryWriter writer)
+        {
+            if (RequestID != null)
+            {
+                writer.Write((byte)1);
+                writer.Write(RequestID); // BinaryWriter.Write(string) = 7-bit-length-prefixed
+            }
+            else
+            {
+                writer.Write((byte)0);
+            }
         }
 
         //verifies commands sent by clients before running and forwarding them.

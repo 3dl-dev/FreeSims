@@ -4,6 +4,7 @@
  * http://mozilla.org/MPL/2.0/. 
  */
 
+using FSO.Files.Formats.IFF.Chunks;
 using FSO.SimAntics.Engine;
 using System;
 using System.Collections.Generic;
@@ -18,6 +19,7 @@ namespace FSO.SimAntics.NetPlay.Model.Commands
         public ushort Interaction;
         public short CalleeID;
         public short Param0;
+        public byte Preempt; // 1 = cancel current action, push new one at Maximum priority with Leapfrog
 
         public override bool Execute(VM vm)
         {
@@ -25,8 +27,18 @@ namespace FSO.SimAntics.NetPlay.Model.Commands
             VMEntity caller = vm.Entities.FirstOrDefault(x => x.PersistID == ActorUID);
             if (callee == null || caller == null) return false;
             if ((caller.Thread?.Queue?.Count ?? 0) >= VMThread.MAX_USER_ACTIONS) return false;
-            callee.PushUserInteraction(Interaction, caller, vm.Context, new short[] { Param0, 0, 0, 0 });
 
+            if (Preempt == 1 && caller.Thread.Queue.Count > 0)
+                caller.Thread.CancelAction(caller.Thread.Queue[0].UID);
+
+            var action = callee.GetAction(Interaction, caller, vm.Context, new short[] { Param0, 0, 0, 0 });
+            if (action == null) return false;
+            if (Preempt == 1)
+            {
+                action.Priority = (short)VMQueuePriority.Maximum;
+                action.Flags |= TTABFlags.Leapfrog;
+            }
+            caller.Thread.EnqueueAction(action);
             return true;
         }
 
@@ -38,6 +50,8 @@ namespace FSO.SimAntics.NetPlay.Model.Commands
             writer.Write(Interaction);
             writer.Write(CalleeID);
             writer.Write(Param0);
+            writer.Write(Preempt);
+            SerializeRequestID(writer);
         }
 
         public override void Deserialize(BinaryReader reader)
@@ -46,6 +60,10 @@ namespace FSO.SimAntics.NetPlay.Model.Commands
             Interaction = reader.ReadUInt16();
             CalleeID = reader.ReadInt16();
             Param0 = reader.ReadInt16();
+            // Backward compatible: default Preempt=0 if not present
+            if (reader.BaseStream.Position < reader.BaseStream.Length)
+                Preempt = reader.ReadByte();
+            DeserializeRequestID(reader);
         }
 
         #endregion

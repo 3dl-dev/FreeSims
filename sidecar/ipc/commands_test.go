@@ -1,0 +1,400 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.
+ * If a copy of the MPL was not distributed with this file, You can obtain one at
+ * http://mozilla.org/MPL/2.0/.
+ */
+
+package ipc
+
+import (
+	"bytes"
+	"encoding/binary"
+	"testing"
+)
+
+func TestWrite7BitEncodedInt(t *testing.T) {
+	tests := []struct {
+		name string
+		val  int
+		want []byte
+	}{
+		{"zero", 0, []byte{0x00}},
+		{"small", 5, []byte{0x05}},
+		{"max-one-byte", 127, []byte{0x7F}},
+		{"two-bytes-128", 128, []byte{0x80, 0x01}},
+		{"two-bytes-200", 200, []byte{0xC8, 0x01}},
+		{"two-bytes-16383", 16383, []byte{0xFF, 0x7F}},
+		{"three-bytes", 16384, []byte{0x80, 0x80, 0x01}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			write7BitEncodedInt(&buf, tt.val)
+			got := buf.Bytes()
+			if !bytes.Equal(got, tt.want) {
+				t.Errorf("write7BitEncodedInt(%d) = %v, want %v", tt.val, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestChatCmdSerialize(t *testing.T) {
+	cmd := &ChatCmd{ActorUID: 42, Message: "Hello"}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Expected: [CmdChat=4][ActorUID LE 42][7bit-len 5]["Hello"]
+	if data[0] != byte(CmdChat) {
+		t.Errorf("type byte = %d, want %d", data[0], CmdChat)
+	}
+
+	actorUID := binary.LittleEndian.Uint32(data[1:5])
+	if actorUID != 42 {
+		t.Errorf("ActorUID = %d, want 42", actorUID)
+	}
+
+	// Length prefix: "Hello" is 5 bytes, 7-bit encoded as 0x05
+	if data[5] != 0x05 {
+		t.Errorf("string length byte = 0x%02x, want 0x05", data[5])
+	}
+
+	msg := string(data[6:11])
+	if msg != "Hello" {
+		t.Errorf("message = %q, want %q", msg, "Hello")
+	}
+}
+
+func TestInteractionCmdSerialize(t *testing.T) {
+	cmd := &InteractionCmd{ActorUID: 1, Interaction: 3, CalleeID: 7, Param0: 0}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if data[0] != byte(CmdInteraction) {
+		t.Errorf("type byte = %d, want %d", data[0], CmdInteraction)
+	}
+
+	actorUID := binary.LittleEndian.Uint32(data[1:5])
+	if actorUID != 1 {
+		t.Errorf("ActorUID = %d, want 1", actorUID)
+	}
+
+	interaction := binary.LittleEndian.Uint16(data[5:7])
+	if interaction != 3 {
+		t.Errorf("Interaction = %d, want 3", interaction)
+	}
+
+	calleeID := int16(binary.LittleEndian.Uint16(data[7:9]))
+	if calleeID != 7 {
+		t.Errorf("CalleeID = %d, want 7", calleeID)
+	}
+
+	// Layout: [type=1][uid:4][interaction:2][calleeID:2][param0:2][preempt:1][hasRequestID:1] = 13 total
+	if len(data) != 13 {
+		t.Errorf("InteractionCmd total bytes = %d, want 13", len(data))
+	}
+	if data[11] != 0 {
+		t.Errorf("Preempt byte = %d, want 0", data[11])
+	}
+	// tail: hasRequestID=0 (no correlation ID)
+	if data[12] != 0 {
+		t.Errorf("hasRequestID tail = %d, want 0", data[12])
+	}
+}
+
+func TestInteractionCmdPreempt(t *testing.T) {
+	cmd := &InteractionCmd{ActorUID: 1, Interaction: 3, CalleeID: 7, Preempt: 1}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data[11] != 1 {
+		t.Errorf("Preempt byte = %d, want 1", data[11])
+	}
+}
+
+func TestGotoCmdSerialize(t *testing.T) {
+	cmd := &GotoCmd{ActorUID: 2, Interaction: 0, X: 100, Y: 200, Level: 1}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if data[0] != byte(CmdGoto) {
+		t.Errorf("type byte = %d, want %d", data[0], CmdGoto)
+	}
+
+	x := int16(binary.LittleEndian.Uint16(data[7:9]))
+	if x != 100 {
+		t.Errorf("X = %d, want 100", x)
+	}
+
+	y := int16(binary.LittleEndian.Uint16(data[9:11]))
+	if y != 200 {
+		t.Errorf("Y = %d, want 200", y)
+	}
+
+	level := int8(data[11])
+	if level != 1 {
+		t.Errorf("Level = %d, want 1", level)
+	}
+}
+
+func TestBuyObjectCmdSerialize(t *testing.T) {
+	cmd := &BuyObjectCmd{
+		ActorUID: 28,
+		GUID:     0xDEADBEEF,
+		X:        10 * 16,
+		Y:        15 * 16,
+		Level:    1,
+		Dir:      16, // SOUTH
+	}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Layout: [type=3][uid:4][guid:4][x:2][y:2][level:1][dir:1] = 15 bytes
+	if data[0] != byte(CmdBuyObject) {
+		t.Errorf("type byte = %d, want %d", data[0], CmdBuyObject)
+	}
+	if len(data) != 15 {
+		t.Fatalf("total bytes = %d, want 15", len(data))
+	}
+	if binary.LittleEndian.Uint32(data[1:5]) != 28 {
+		t.Errorf("ActorUID mismatch")
+	}
+	if binary.LittleEndian.Uint32(data[5:9]) != 0xDEADBEEF {
+		t.Errorf("GUID = %#x, want %#x", binary.LittleEndian.Uint32(data[5:9]), 0xDEADBEEF)
+	}
+	if int16(binary.LittleEndian.Uint16(data[9:11])) != 160 {
+		t.Errorf("X = %d, want 160", int16(binary.LittleEndian.Uint16(data[9:11])))
+	}
+	if int16(binary.LittleEndian.Uint16(data[11:13])) != 240 {
+		t.Errorf("Y = %d, want 240", int16(binary.LittleEndian.Uint16(data[11:13])))
+	}
+	if int8(data[13]) != 1 {
+		t.Errorf("Level = %d, want 1", int8(data[13]))
+	}
+	if data[14] != 16 {
+		t.Errorf("Dir = %d, want 16", data[14])
+	}
+}
+
+func TestMoveObjectCmdSerialize(t *testing.T) {
+	cmd := &MoveObjectCmd{
+		ActorUID: 28,
+		ObjectID: 44,
+		X:        -3,
+		Y:        256,
+		Level:    2,
+		Dir:      1,
+	}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Layout: [type=8][uid:4][objID:2][x:2][y:2][level:1][dir:1] = 13 bytes
+	if data[0] != byte(CmdMoveObject) {
+		t.Errorf("type byte = %d, want %d", data[0], CmdMoveObject)
+	}
+	if len(data) != 13 {
+		t.Fatalf("total bytes = %d, want 13", len(data))
+	}
+	if int16(binary.LittleEndian.Uint16(data[5:7])) != 44 {
+		t.Errorf("ObjectID mismatch")
+	}
+	if int16(binary.LittleEndian.Uint16(data[7:9])) != -3 {
+		t.Errorf("X = %d, want -3", int16(binary.LittleEndian.Uint16(data[7:9])))
+	}
+	if int16(binary.LittleEndian.Uint16(data[9:11])) != 256 {
+		t.Errorf("Y = %d, want 256", int16(binary.LittleEndian.Uint16(data[9:11])))
+	}
+	if int8(data[11]) != 2 {
+		t.Errorf("Level = %d, want 2", int8(data[11]))
+	}
+	if data[12] != 1 {
+		t.Errorf("Dir = %d, want 1", data[12])
+	}
+}
+
+func TestDeleteObjectCmdSerialize(t *testing.T) {
+	cmd := &DeleteObjectCmd{ActorUID: 7, ObjectID: 44, CleanupAll: true}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Layout: [type=9][uid:4][objID:2][cleanup:1] = 8 bytes
+	if data[0] != byte(CmdDeleteObject) {
+		t.Errorf("type byte = %d, want %d", data[0], CmdDeleteObject)
+	}
+	if len(data) != 8 {
+		t.Fatalf("total bytes = %d, want 8", len(data))
+	}
+	if int16(binary.LittleEndian.Uint16(data[5:7])) != 44 {
+		t.Errorf("ObjectID mismatch")
+	}
+	if data[7] != 1 {
+		t.Errorf("CleanupAll = %d, want 1", data[7])
+	}
+}
+
+func TestDeleteObjectCmdNoCleanup(t *testing.T) {
+	cmd := &DeleteObjectCmd{ActorUID: 7, ObjectID: 44, CleanupAll: false}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data[7] != 0 {
+		t.Errorf("CleanupAll = %d, want 0", data[7])
+	}
+}
+
+func TestChangeLotSizeCmdSerialize(t *testing.T) {
+	cmd := &ChangeLotSizeCmd{ActorUID: 99, LotSize: 5, LotStories: 2}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Layout: [type=25][uid:4][size:1][stories:1] = 7 bytes
+	if data[0] != byte(CmdChangeLotSize) {
+		t.Errorf("type byte = %d, want %d", data[0], CmdChangeLotSize)
+	}
+	if len(data) != 7 {
+		t.Fatalf("total bytes = %d, want 7", len(data))
+	}
+	if binary.LittleEndian.Uint32(data[1:5]) != 99 {
+		t.Errorf("ActorUID mismatch")
+	}
+	if data[5] != 5 {
+		t.Errorf("LotSize = %d, want 5", data[5])
+	}
+	if data[6] != 2 {
+		t.Errorf("LotStories = %d, want 2", data[6])
+	}
+}
+
+func TestArchitectureCmdEmpty(t *testing.T) {
+	cmd := &ArchitectureCmd{ActorUID: 1, Ops: nil}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Layout: [type=2][uid:4][count=0:4] = 9 bytes
+	if data[0] != byte(CmdArchitecture) {
+		t.Errorf("type byte = %d, want %d", data[0], CmdArchitecture)
+	}
+	if len(data) != 9 {
+		t.Fatalf("total bytes = %d, want 9", len(data))
+	}
+	if binary.LittleEndian.Uint32(data[5:9]) != 0 {
+		t.Errorf("count = %d, want 0", binary.LittleEndian.Uint32(data[5:9]))
+	}
+}
+
+func TestArchitectureCmdSingleOp(t *testing.T) {
+	cmd := &ArchitectureCmd{
+		ActorUID: 28,
+		Ops: []ArchOp{
+			{
+				Type:    ArchPatternDot,
+				X:       5,
+				Y:       10,
+				Level:   1,
+				X2:      0,
+				Y2:      0,
+				Pattern: 494,
+				Style:   0,
+			},
+		},
+	}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Layout: [type=2][uid:4][count=1:4][op:22] = 31 bytes
+	// op: [type:1][x:4][y:4][level:1][x2:4][y2:4][pattern:2][style:2]
+	if len(data) != 31 {
+		t.Fatalf("total bytes = %d, want 31", len(data))
+	}
+	if binary.LittleEndian.Uint32(data[5:9]) != 1 {
+		t.Errorf("count = %d, want 1", binary.LittleEndian.Uint32(data[5:9]))
+	}
+	// op starts at offset 9
+	if data[9] != byte(ArchPatternDot) {
+		t.Errorf("op type = %d, want %d", data[9], ArchPatternDot)
+	}
+	if int32(binary.LittleEndian.Uint32(data[10:14])) != 5 {
+		t.Errorf("op X = %d, want 5", int32(binary.LittleEndian.Uint32(data[10:14])))
+	}
+	if int32(binary.LittleEndian.Uint32(data[14:18])) != 10 {
+		t.Errorf("op Y = %d, want 10", int32(binary.LittleEndian.Uint32(data[14:18])))
+	}
+	if int8(data[18]) != 1 {
+		t.Errorf("op Level = %d, want 1", int8(data[18]))
+	}
+	if int32(binary.LittleEndian.Uint32(data[19:23])) != 0 {
+		t.Errorf("op X2 = %d, want 0", int32(binary.LittleEndian.Uint32(data[19:23])))
+	}
+	if int32(binary.LittleEndian.Uint32(data[23:27])) != 0 {
+		t.Errorf("op Y2 = %d, want 0", int32(binary.LittleEndian.Uint32(data[23:27])))
+	}
+	if binary.LittleEndian.Uint16(data[27:29]) != 494 {
+		t.Errorf("op Pattern = %d, want 494", binary.LittleEndian.Uint16(data[27:29]))
+	}
+	if binary.LittleEndian.Uint16(data[29:31]) != 0 {
+		t.Errorf("op Style = %d, want 0", binary.LittleEndian.Uint16(data[29:31]))
+	}
+}
+
+func TestArchitectureCmdMultipleOps(t *testing.T) {
+	cmd := &ArchitectureCmd{
+		ActorUID: 1,
+		Ops: []ArchOp{
+			{Type: ArchWallLine, X: 1, Y: 2, Level: 1, X2: 5, Y2: 0, Pattern: 1, Style: 2},
+			{Type: ArchFloorRect, X: 3, Y: 4, Level: 1, X2: 2, Y2: 2, Pattern: 10, Style: 0},
+		},
+	}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Layout: 1 + 4 + 4 + 22*2 = 53 bytes
+	if len(data) != 53 {
+		t.Fatalf("total bytes = %d, want 53", len(data))
+	}
+	if binary.LittleEndian.Uint32(data[5:9]) != 2 {
+		t.Errorf("count = %d, want 2", binary.LittleEndian.Uint32(data[5:9]))
+	}
+	// second op starts at offset 9+22 = 31
+	if data[31] != byte(ArchFloorRect) {
+		t.Errorf("second op type = %d, want %d", data[31], ArchFloorRect)
+	}
+}
+
+func TestChatLongMessageTruncation(t *testing.T) {
+	long := make([]byte, 300)
+	for i := range long {
+		long[i] = 'A'
+	}
+	cmd := &ChatCmd{ActorUID: 1, Message: string(long)}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// After type(1) + actorUID(4) + 7bit-len(2 bytes for 200) + message(200)
+	// 7-bit encoded 200 = [0xC8, 0x01]
+	lenByte1 := data[5]
+	lenByte2 := data[6]
+	if lenByte1 != 0xC8 || lenByte2 != 0x01 {
+		t.Errorf("encoded length = [0x%02x, 0x%02x], want [0xC8, 0x01]", lenByte1, lenByte2)
+	}
+
+	// Total: 1 + 4 + 2 + 200 + 1 (hasRequestID=0) = 208
+	if len(data) != 208 {
+		t.Errorf("total length = %d, want 208", len(data))
+	}
+}
