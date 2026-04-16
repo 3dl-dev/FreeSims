@@ -241,6 +241,62 @@ func TestMixedFrames(t *testing.T) {
 	}
 }
 
+// TestTickIDLeadingBraceRouting is a regression test for a real bug observed in
+// the multi-agent demo: tick_id 379 (0x0000017b LE) has byte[0] == 0x7b == '{',
+// which previously caused the ack to be mis-routed to the JSON frame parser.
+// The fix was to discriminate frames by length alone (16 = ack, else JSON).
+func TestTickIDLeadingBraceRouting(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "tickbrace.sock")
+
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		accepted <- conn
+	}()
+
+	client := NewClient(sockPath)
+	defer client.Close()
+
+	go func() { _ = client.Connect() }()
+
+	var gameConn net.Conn
+	select {
+	case gameConn = <-accepted:
+		defer gameConn.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for client connect")
+	}
+
+	// Send ticks whose LE byte[0] equals '{' (0x7b): 0x0000017b=379, 0x0000027b=635.
+	for _, tid := range []uint32{0x0000017b, 0x0000027b, 0x0000037b} {
+		ackFrame := make([]byte, 4+ackPayloadSize)
+		binary.LittleEndian.PutUint32(ackFrame[0:4], ackPayloadSize)
+		binary.LittleEndian.PutUint32(ackFrame[4:8], tid)
+		binary.LittleEndian.PutUint32(ackFrame[8:12], 0)
+		binary.LittleEndian.PutUint64(ackFrame[12:20], 0)
+		if _, err := gameConn.Write(ackFrame); err != nil {
+			t.Fatalf("write ack tid=0x%x: %v", tid, err)
+		}
+		select {
+		case ack := <-client.AckCh:
+			if ack.TickID != tid {
+				t.Errorf("ack TickID = 0x%x, want 0x%x", ack.TickID, tid)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("ack tid=0x%x timed out — likely mis-routed to JSON parser", tid)
+		}
+	}
+}
+
 // TestRequestResponseCorrelation verifies the end-to-end correlation protocol:
 //
 //  1. Client sends a ChatCmd with a RequestID ("abc123") over a real Unix socket.
