@@ -67,6 +67,9 @@ type jsonCommand struct {
 
 	// Architecture fields
 	Ops []jsonArchOp `json:"ops,omitempty"`
+
+	// QueryCatalog fields
+	Category string `json:"category,omitempty"`
 }
 
 // jsonArchOp mirrors ipc.ArchOp for JSON decoding.
@@ -104,7 +107,7 @@ func main() {
 	log.SetFlags(log.Ltime | log.Lmicroseconds)
 
 	if *campfire {
-		log.Println("[sidecar] --campfire: convention declarations are embedded (5 operations)")
+		log.Println("[sidecar] --campfire: convention declarations are embedded (6 operations)")
 		log.Println("[sidecar] --campfire: CampfireSDK integration not yet wired — declarations will be published when SDK is available")
 	}
 
@@ -316,6 +319,17 @@ func parseCommand(jcmd jsonCommand) (ipc.Command, error) {
 		return &ipc.ArchitectureCmd{
 			ActorUID: jcmd.ActorUID,
 			Ops:      ops,
+		}, nil
+
+	case "query-catalog":
+		cat := jcmd.Category
+		if cat == "" {
+			cat = "all"
+		}
+		return &ipc.QueryCatalogCmd{
+			ActorUID:  jcmd.ActorUID,
+			Category:  cat,
+			RequestID: jcmd.RequestID,
 		}, nil
 
 	default:

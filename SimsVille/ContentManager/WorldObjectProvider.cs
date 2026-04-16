@@ -499,6 +499,18 @@ namespace FSO.Content
 
         private ConcurrentDictionary<string, GameObjectResource> ProcessedFiles = new ConcurrentDictionary<string, GameObjectResource>();
 
+        /// <summary>
+        /// Returns a cached GameObject without triggering an IFF load.
+        /// Returns null if the object is not yet in the in-memory cache.
+        /// Used by VMNetQueryCatalogCmd to read OBJD metadata cheaply.
+        /// </summary>
+        public GameObject GetCached(uint id)
+        {
+            GameObject result;
+            Cache.TryGetValue((ulong)id, out result);
+            return result;
+        }
+
         #region IContentProvider<GameObject> Members
 
         public GameObject Get(uint id, bool ts1)

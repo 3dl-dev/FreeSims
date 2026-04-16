@@ -41,6 +41,7 @@ namespace FSO.SimAntics.NetPlay.Model
             { VMCommandType.EODObjEvent, typeof(VMNetEODEventCmd) },
             { VMCommandType.EODMessage, typeof(VMNetEODMessageCmd) },
             { VMCommandType.SetRoof, typeof(VMNetSetRoofCmd) },
+            { VMCommandType.QueryCatalog, typeof(VMNetQueryCatalogCmd) },
 
         };
         public static Dictionary<Type, VMCommandType> ReverseMap = CmdMap.ToDictionary(x => x.Value, x => x.Key);
@@ -127,6 +128,12 @@ namespace FSO.SimAntics.NetPlay.Model
         SetOutfit = 33,
 
         TimeoutNotify = 34,
-        ChangeControl = 35
+        ChangeControl = 35,
+
+        /// <summary>
+        /// Query the object catalog (reeims-af0). Returns up to 500 entries with
+        /// {guid, name, price, category, subcategory} as a JSON response frame.
+        /// </summary>
+        QueryCatalog = 36
     }
 }

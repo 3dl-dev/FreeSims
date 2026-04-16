@@ -8,6 +8,7 @@ package ipc
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
@@ -422,6 +423,155 @@ func TestResponseAndPerceptionInterleaved(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for response 2")
+	}
+}
+
+// TestQueryCatalogRoundTrip simulates the catalog query → response JSON parse path:
+//
+//  1. Client sends a QueryCatalogCmd with RequestID="qc1" over a real Unix socket.
+//  2. Fake-game reads the frame and verifies: type byte=36, category="all", requestID="qc1".
+//  3. Fake-game sends back a catalog response with >=1 entry containing all required fields.
+//  4. We verify the client dispatches it to ResponseCh and the payload parses correctly.
+func TestQueryCatalogRoundTrip(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "catalog.sock")
+
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		accepted <- conn
+	}()
+
+	client := NewClient(sockPath)
+	defer client.Close()
+
+	go func() {
+		_ = client.Connect()
+	}()
+
+	var gameConn net.Conn
+	select {
+	case gameConn = <-accepted:
+		defer gameConn.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for client connect")
+	}
+
+	// Build and send a QueryCatalogCmd with RequestID="qc1"
+	const reqID = "qc1"
+	cmd := &QueryCatalogCmd{ActorUID: 28, Category: "all", RequestID: reqID}
+	payload, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal("serialize:", err)
+	}
+	if err := client.SendFrame(payload); err != nil {
+		t.Fatal("send:", err)
+	}
+
+	// Read the frame on the game side and verify wire format
+	gameConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var lenBuf [4]byte
+	if _, err := readFull(gameConn, lenBuf[:]); err != nil {
+		t.Fatal("read frame length:", err)
+	}
+	frameLen := binary.LittleEndian.Uint32(lenBuf[:])
+	frameBuf := make([]byte, frameLen)
+	if _, err := readFull(gameConn, frameBuf); err != nil {
+		t.Fatal("read frame payload:", err)
+	}
+
+	// Verify: [type=36][ActorUID=28 LE][len(3)+"all"][hasRequestID=1][len(3)+"qc1"]
+	if frameBuf[0] != byte(CmdQueryCatalog) {
+		t.Fatalf("type byte = %d, want %d (CmdQueryCatalog=36)", frameBuf[0], CmdQueryCatalog)
+	}
+	actorUID := binary.LittleEndian.Uint32(frameBuf[1:5])
+	if actorUID != 28 {
+		t.Errorf("ActorUID = %d, want 28", actorUID)
+	}
+	// category "all" at offset 5: len=3, then bytes
+	if frameBuf[5] != 0x03 {
+		t.Errorf("category length = 0x%02x, want 0x03", frameBuf[5])
+	}
+	if string(frameBuf[6:9]) != "all" {
+		t.Errorf("category = %q, want all", string(frameBuf[6:9]))
+	}
+	// hasRequestID = 1 at offset 9
+	if frameBuf[9] != 1 {
+		t.Errorf("hasRequestID = %d, want 1", frameBuf[9])
+	}
+	// "qc1" length at offset 10
+	if frameBuf[10] != 0x03 {
+		t.Errorf("requestID length = 0x%02x, want 0x03", frameBuf[10])
+	}
+	if string(frameBuf[11:14]) != "qc1" {
+		t.Errorf("requestID = %q, want qc1", string(frameBuf[11:14]))
+	}
+
+	// Simulate game sending a catalog response with 2 sample entries
+	catalogJSON := `{"type":"response","request_id":"qc1","status":"ok","payload":{"catalog":[` +
+		`{"guid":12345,"name":"Sofa","price":500,"category":"seating","subcategory":"livingroom"},` +
+		`{"guid":67890,"name":"Lamp","price":150,"category":"lighting","subcategory":"indoor"}` +
+		`]}}`
+	respFrame := make([]byte, 4+len(catalogJSON))
+	binary.LittleEndian.PutUint32(respFrame[0:4], uint32(len(catalogJSON)))
+	copy(respFrame[4:], catalogJSON)
+	if _, err := gameConn.Write(respFrame); err != nil {
+		t.Fatal("write response frame:", err)
+	}
+
+	// Verify client delivers it to ResponseCh
+	select {
+	case rf := <-client.ResponseCh:
+		if rf.RequestID != reqID {
+			t.Errorf("ResponseFrame.RequestID = %q, want %q", rf.RequestID, reqID)
+		}
+		if rf.Status != "ok" {
+			t.Errorf("ResponseFrame.Status = %q, want ok", rf.Status)
+		}
+		if rf.Type != "response" {
+			t.Errorf("ResponseFrame.Type = %q, want response", rf.Type)
+		}
+		// Verify payload is non-nil and parse as a map.
+		// ResponseFrame.Payload is json.RawMessage.
+		if rf.Payload == nil {
+			t.Fatal("ResponseFrame.Payload is nil")
+		}
+		var payloadMap map[string]interface{}
+		if err := json.Unmarshal(rf.Payload, &payloadMap); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		// Extract catalog array.
+		catalogRaw, ok := payloadMap["catalog"]
+		if !ok {
+			t.Fatal("payload missing 'catalog' key")
+		}
+		catalogArr, ok := catalogRaw.([]interface{})
+		if !ok {
+			t.Fatalf("catalog is not an array, got %T", catalogRaw)
+		}
+		if len(catalogArr) < 1 {
+			t.Fatalf("catalog has %d entries, want >=1", len(catalogArr))
+		}
+		// Verify first entry has all required fields
+		entry, ok := catalogArr[0].(map[string]interface{})
+		if !ok {
+			t.Fatalf("catalog entry[0] is not an object, got %T", catalogArr[0])
+		}
+		for _, field := range []string{"guid", "name", "price", "category", "subcategory"} {
+			if _, exists := entry[field]; !exists {
+				t.Errorf("catalog entry[0] missing required field %q", field)
+			}
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for catalog response on ResponseCh")
 	}
 }
 

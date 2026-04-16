@@ -289,6 +289,22 @@ namespace FSO.SimAntics.NetPlay.Drivers
         /// </summary>
         private void SendResponseFrame(string requestId, string status)
         {
+            SendResponseFrameWithPayload(requestId, status, "{}");
+        }
+
+        /// <summary>
+        /// Emits a JSON response frame with a custom payload JSON string.
+        /// Used by VMNetQueryCatalogCmd to return the catalog array.
+        /// Format: {"type":"response","request_id":"...","status":"ok","payload":{...}}
+        /// </summary>
+        internal void SendCatalogResponse(string requestId, string catalogArrayJson)
+        {
+            var payloadJson = "{\"catalog\":" + catalogArrayJson + "}";
+            SendResponseFrameWithPayload(requestId, "ok", payloadJson);
+        }
+
+        private void SendResponseFrameWithPayload(string requestId, string status, string payloadJson)
+        {
             if (_client == null) return;
 
             try
@@ -296,7 +312,7 @@ namespace FSO.SimAntics.NetPlay.Drivers
                 // Manually build the JSON to avoid a dependency on System.Text.Json or Newtonsoft.
                 // requestId and status are controlled values — no embedded quotes to escape.
                 var escaped = requestId.Replace("\\", "\\\\").Replace("\"", "\\\"");
-                var json = $"{{\"type\":\"response\",\"request_id\":\"{escaped}\",\"status\":\"{status}\",\"payload\":{{}}}}";
+                var json = $"{{\"type\":\"response\",\"request_id\":\"{escaped}\",\"status\":\"{status}\",\"payload\":{payloadJson}}}";
                 var jsonBytes = Encoding.UTF8.GetBytes(json);
 
                 var frame = new byte[4 + jsonBytes.Length];
