@@ -6,6 +6,16 @@
 
 package ipc
 
+// Clock holds the in-game time emitted by PerceptionEmitter (§reeims-d43).
+// day_of_week is absent — VMClock does not track it.
+type Clock struct {
+	Hours     int `json:"hours"`
+	Minutes   int `json:"minutes"`
+	Seconds   int `json:"seconds"`
+	TimeOfDay int `json:"time_of_day"`
+	Day       int `json:"day"` // DayOfMonth from VMClock
+}
+
 // Perception is the JSON structure sent by the game when a controlled Sim idles.
 type Perception struct {
 	Type             string         `json:"type"`              // always "perception"
@@ -13,6 +23,7 @@ type Perception struct {
 	SimID            int            `json:"sim_id"`
 	Name             string         `json:"name"`
 	Funds            int32          `json:"funds"`             // controlled Sim's current budget (§reeims-2ca)
+	Clock            Clock          `json:"clock"`             // in-game time (§reeims-d43)
 	Motives          Motives        `json:"motives"`
 	Position         Position       `json:"position"`
 	Rotation         float32        `json:"rotation"`

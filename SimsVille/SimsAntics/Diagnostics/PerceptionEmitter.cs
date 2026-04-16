@@ -94,6 +94,8 @@ namespace FSO.SimAntics.Diagnostics
                 });
             }
 
+            var clock = vm.Context.Clock;
+
             return new
             {
                 type = "perception",
@@ -101,6 +103,15 @@ namespace FSO.SimAntics.Diagnostics
                 sim_id = (int)avatar.ObjectID,
                 name = avatar.ToString(),
                 funds = (int)avatar.TSOState.Budget.Value,
+                clock = new
+                {
+                    hours = clock.Hours,
+                    minutes = clock.Minutes,
+                    seconds = clock.Seconds,
+                    time_of_day = clock.TimeOfDay,
+                    day = clock.DayOfMonth,
+                    // day_of_week omitted: VMClock does not track day-of-week (reeims-d43)
+                },
                 motives = new
                 {
                     hunger = avatar.GetMotiveData(VMMotive.Hunger),
