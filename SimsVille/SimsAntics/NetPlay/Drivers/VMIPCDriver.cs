@@ -50,6 +50,9 @@ namespace FSO.SimAntics.NetPlay.Drivers
         private uint _tickId;
         private bool _disposed;
 
+        // Guards concurrent writes to _client.Send from Tick(), OnDialog, and OnPathfindFailed.
+        private readonly object _sendLock = new object();
+
         // Dialog tracking: monotonic counter → pending dialog info (caller PersistID + label).
         // Dialogs are stored until an agent responds or the VM discards them.
         private int _nextDialogId;
@@ -299,12 +302,15 @@ namespace FSO.SimAntics.NetPlay.Drivers
                 BitConverter.TryWriteBytes(new Span<byte>(buf, 8, 4), commandCount);
                 BitConverter.TryWriteBytes(new Span<byte>(buf, 12, 8), randomSeed);
 
-                int sent = 0;
-                while (sent < buf.Length)
+                lock (_sendLock)
                 {
-                    int n = _client.Send(buf, sent, buf.Length - sent, SocketFlags.None);
-                    if (n <= 0) { DropClient(); return; }
-                    sent += n;
+                    int sent = 0;
+                    while (sent < buf.Length)
+                    {
+                        int n = _client.Send(buf, sent, buf.Length - sent, SocketFlags.None);
+                        if (n <= 0) { DropClient(); return; }
+                        sent += n;
+                    }
                 }
             }
             catch (SocketException ex)
@@ -324,12 +330,15 @@ namespace FSO.SimAntics.NetPlay.Drivers
 
             try
             {
-                int sent = 0;
-                while (sent < frame.Length)
+                lock (_sendLock)
                 {
-                    int n = _client.Send(frame, sent, frame.Length - sent, SocketFlags.None);
-                    if (n <= 0) { DropClient(); return; }
-                    sent += n;
+                    int sent = 0;
+                    while (sent < frame.Length)
+                    {
+                        int n = _client.Send(frame, sent, frame.Length - sent, SocketFlags.None);
+                        if (n <= 0) { DropClient(); return; }
+                        sent += n;
+                    }
                 }
             }
             catch (SocketException ex)
@@ -495,12 +504,15 @@ namespace FSO.SimAntics.NetPlay.Drivers
                 BitConverter.TryWriteBytes(new Span<byte>(frame, 0, 4), jsonBytes.Length);
                 Buffer.BlockCopy(jsonBytes, 0, frame, 4, jsonBytes.Length);
 
-                int sent = 0;
-                while (sent < frame.Length)
+                lock (_sendLock)
                 {
-                    int n = _client.Send(frame, sent, frame.Length - sent, SocketFlags.None);
-                    if (n <= 0) { DropClient(); return; }
-                    sent += n;
+                    int sent = 0;
+                    while (sent < frame.Length)
+                    {
+                        int n = _client.Send(frame, sent, frame.Length - sent, SocketFlags.None);
+                        if (n <= 0) { DropClient(); return; }
+                        sent += n;
+                    }
                 }
             }
             catch (SocketException ex)
