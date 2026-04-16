@@ -385,6 +385,33 @@ namespace FSO.SimAntics.NetPlay.Drivers
             SendResponseFrameWithPayload(requestId, status, payloadJson);
         }
 
+        /// <summary>
+        /// Emits a response frame for a QueryWallAt command (reeims-d3c).
+        /// payloadJson is the WallTile JSON object.
+        /// </summary>
+        internal void SendWallAtResponse(string requestId, string payloadJson)
+        {
+            SendResponseFrameWithPayload(requestId, "ok", payloadJson);
+        }
+
+        /// <summary>
+        /// Emits a response frame for a QueryFloorAt command (reeims-d3c).
+        /// payloadJson is the FloorTile JSON object.
+        /// </summary>
+        internal void SendFloorAtResponse(string requestId, string payloadJson)
+        {
+            SendResponseFrameWithPayload(requestId, "ok", payloadJson);
+        }
+
+        /// <summary>
+        /// Emits a response frame for a QueryTilePathable command (reeims-d3c).
+        /// payloadJson is the pathability JSON object.
+        /// </summary>
+        internal void SendTilePathableResponse(string requestId, string payloadJson)
+        {
+            SendResponseFrameWithPayload(requestId, "ok", payloadJson);
+        }
+
         private void SendResponseFrameWithPayload(string requestId, string status, string payloadJson)
         {
             if (_client == null) return;
