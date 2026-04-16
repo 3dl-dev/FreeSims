@@ -247,10 +247,14 @@ func (c *Client) dispatchJSONFrame(payload []byte) {
 			log.Printf("[ipc] response channel full, dropping response for request_id=%s", rf.RequestID)
 		}
 	case "perception":
-		cp := make([]byte, len(payload))
-		copy(cp, payload)
+		// Parse, strip self from lot_avatars, re-serialise (reeims-221).
+		// The C# PerceptionEmitter filter (a.PersistID != avatar.PersistID) can
+		// mis-fire when a controlled Sim's entity has an unexpected PersistID at
+		// query time. We apply a defensive second pass in the sidecar so that
+		// agents never observe themselves in their own lot_avatars list.
+		cleaned := filterSelfFromPerception(payload)
 		select {
-		case c.PerceptionCh <- cp:
+		case c.PerceptionCh <- cleaned:
 		default:
 			log.Printf("[ipc] perception channel full, dropping event")
 		}
@@ -286,6 +290,45 @@ func (c *Client) dispatchJSONFrame(payload []byte) {
 			log.Printf("[ipc] perception channel full, dropping unknown JSON event type=%q", header.Type)
 		}
 	}
+}
+
+// filterSelfFromPerception removes any lot_avatars entry whose persist_id equals
+// the perception's own persist_id. This is a defensive fix for reeims-221: the
+// C# PerceptionEmitter may fail to exclude the observing Sim when its entity
+// holds an unexpected PersistID at query time (e.g. after VMIPCDriver temporarily
+// reassigns PersistIDs). Returns the cleaned JSON; on any parse error the
+// original payload is returned unchanged so agents still receive the frame.
+func filterSelfFromPerception(payload []byte) []byte {
+	var p Perception
+	if err := json.Unmarshal(payload, &p); err != nil {
+		log.Printf("[ipc] filterSelfFromPerception: unmarshal error: %v", err)
+		return payload
+	}
+
+	// Fast path: no lot_avatars at all or none match self.
+	filtered := p.LotAvatars[:0]
+	selfID := p.PersistID
+	removed := 0
+	for _, la := range p.LotAvatars {
+		if la.PersistID == selfID {
+			removed++
+			continue
+		}
+		filtered = append(filtered, la)
+	}
+	if removed == 0 {
+		// Nothing to strip — return original bytes to avoid a spurious re-encode.
+		return payload
+	}
+
+	p.LotAvatars = filtered
+	cleaned, err := json.Marshal(p)
+	if err != nil {
+		log.Printf("[ipc] filterSelfFromPerception: marshal error: %v", err)
+		return payload
+	}
+	log.Printf("[ipc] filterSelfFromPerception: removed %d self-entry(ies) from lot_avatars for persist_id=%d", removed, selfID)
+	return cleaned
 }
 
 // readFrame reads one length-prefixed frame from the socket.
