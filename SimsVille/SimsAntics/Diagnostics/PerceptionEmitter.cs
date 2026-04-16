@@ -76,6 +76,7 @@ namespace FSO.SimAntics.Diagnostics
 
         private static object BuildPerception(VM vm, VMAvatar avatar)
         {
+            var relationships = BuildRelationships(vm, avatar);
             // Nearby objects with their available interactions (pie menus)
             var nearbyObjects = new List<object>();
             foreach (var entity in vm.Entities)
@@ -185,6 +186,13 @@ namespace FSO.SimAntics.Diagnostics
                 // currently commented out in Content.cs. Those fields are null until wired — known gap.
                 // Work hours (start/end) are stored in CARR.JobLevel — also unavailable without provider.
                 job = BuildJobPayload(avatar),
+                // Relationships (reeims-2eb).
+                // MeToObject is keyed by session-local ObjectID; RelVar[0] is the friendship score.
+                // Only entries whose ObjectID maps to a live VMAvatar on the lot are included.
+                // family_tag is null in local/VMLocalDriver mode — TS1 family membership is a
+                // neighbourhood-level concept not tracked per-Sim at runtime.
+                // is_roommate is true when the other avatar's VMTSOAvatarState.Permissions >= Roommate.
+                relationships = relationships,
             };
         }
         /// <summary>
@@ -197,6 +205,52 @@ namespace FSO.SimAntics.Diagnostics
         /// is commented out in Content.cs — this fork does not currently initialise it. Those fields
         /// are emitted as null/0 and flagged as a known gap in the commit body.
         /// </summary>
+        /// <summary>
+        /// Builds the relationships array for a Sim's perception payload (reeims-2eb).
+        ///
+        /// Source: VMEntity.MeToObject — Dictionary&lt;ushort, List&lt;short&gt;&gt; keyed by session-local
+        /// ObjectID. RelVar[0] is the friendship score in the range [-1000, 1000].
+        ///
+        /// Only entries whose ObjectID maps to a live VMAvatar on the lot are included.
+        /// family_tag is null — TS1 family membership is not tracked per-Sim at runtime in
+        /// VMLocalDriver mode; it lives in the neighbourhood.iff NGBH chunk which is not loaded
+        /// for in-lot perception. is_roommate reflects VMTSOAvatarState.Permissions >= Roommate.
+        /// </summary>
+        private static List<object> BuildRelationships(VM vm, VMAvatar avatar)
+        {
+            var result = new List<object>();
+
+            foreach (var kv in avatar.MeToObject)
+            {
+                var otherId = kv.Key; // session-local ObjectID
+                var relVars = kv.Value;
+
+                // Only emit relationships to live avatars on the lot
+                var other = vm.GetObjectById((short)otherId) as VMAvatar;
+                if (other == null) continue;
+
+                // RelVar[0] is the friendship score; default 0 if not yet written
+                int friendship = relVars.Count > 0 ? relVars[0] : 0;
+
+                // Roommate check: Roommate permission level or higher
+                bool isRoommate = false;
+                if (other.TSOState is FSO.SimAntics.Model.TSOPlatform.VMTSOAvatarState tsoState)
+                    isRoommate = tsoState.Permissions >= FSO.SimAntics.Model.TSOPlatform.VMTSOAvatarPermissions.Roommate;
+
+                result.Add(new
+                {
+                    other_persist_id = other.PersistID,
+                    other_name       = other.ToString(),
+                    friendship       = friendship,
+                    // family_tag: null — TS1 family membership not tracked at runtime (known gap)
+                    family_tag       = (string)null,
+                    is_roommate      = isRoommate,
+                });
+            }
+
+            return result;
+        }
+
         private static object BuildJobPayload(VMAvatar avatar)
         {
             var jobType  = avatar.GetPersonData(VMPersonDataVariable.JobType);
