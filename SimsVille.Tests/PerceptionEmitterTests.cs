@@ -100,7 +100,16 @@ namespace SimsVille.Tests
                     "level": 2,
                     "salary": 0,
                     "work_hours": null
-                }
+                },
+                "relationships": [
+                    {
+                        "other_persist_id": 2,
+                        "other_name": "Bob",
+                        "friendship": 250,
+                        "family_tag": null,
+                        "is_roommate": false
+                    }
+                ]
             }
             """;
 
@@ -443,6 +452,69 @@ namespace SimsVille.Tests
             Assert.Equal(2, level.GetInt32());
         }
 
+        // ── Relationships tests (reeims-2eb) ──────────────────────────────────────
+
+        [Fact]
+        public void PerceptionJson_ContainsRelationshipsField()
+        {
+            using var doc = JsonDocument.Parse(SamplePerceptionJson);
+            Assert.True(doc.RootElement.TryGetProperty("relationships", out var elem),
+                "perception JSON must contain a 'relationships' property");
+            Assert.Equal(JsonValueKind.Array, elem.ValueKind);
+        }
+
+        [Fact]
+        public void PerceptionJson_RelationshipsShape_HasRequiredFields()
+        {
+            using var doc = JsonDocument.Parse(SamplePerceptionJson);
+            var rels = doc.RootElement.GetProperty("relationships");
+
+            Assert.True(rels.GetArrayLength() > 0, "sample JSON must have at least one relationship");
+            var r = rels[0];
+
+            Assert.True(r.TryGetProperty("other_persist_id", out _), "relationship must have 'other_persist_id'");
+            Assert.True(r.TryGetProperty("other_name",       out _), "relationship must have 'other_name'");
+            Assert.True(r.TryGetProperty("friendship",       out _), "relationship must have 'friendship'");
+            Assert.True(r.TryGetProperty("family_tag",       out _), "relationship must have 'family_tag'");
+            Assert.True(r.TryGetProperty("is_roommate",      out _), "relationship must have 'is_roommate'");
+        }
+
+        [Fact]
+        public void PerceptionJson_RelationshipsValues_AreCorrect()
+        {
+            using var doc = JsonDocument.Parse(SamplePerceptionJson);
+            var r = doc.RootElement.GetProperty("relationships")[0];
+
+            Assert.Equal(2u,     r.GetProperty("other_persist_id").GetUInt32());
+            Assert.Equal("Bob",  r.GetProperty("other_name").GetString());
+            Assert.Equal(250,    r.GetProperty("friendship").GetInt32());
+            Assert.Equal(JsonValueKind.Null, r.GetProperty("family_tag").ValueKind);
+            Assert.Equal(JsonValueKind.False, r.GetProperty("is_roommate").ValueKind);
+        }
+
+        [Fact]
+        public void PerceptionJson_Relationships_RoundTrip_PreservesValues()
+        {
+            var dto = JsonSerializer.Deserialize<PerceptionDto>(SamplePerceptionJson,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            Assert.NotNull(dto);
+            Assert.NotNull(dto.Relationships);
+            Assert.Equal(1, dto.Relationships.Count);
+
+            var r = dto.Relationships[0];
+            Assert.Equal(2u,    r.OtherPersistId);
+            Assert.Equal("Bob", r.OtherName);
+            Assert.Equal(250,   r.Friendship);
+            Assert.Null(r.FamilyTag);
+            Assert.False(r.IsRoommate);
+
+            var reEncoded = JsonSerializer.Serialize(dto);
+            var dto2 = JsonSerializer.Deserialize<PerceptionDto>(reEncoded,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            Assert.NotNull(dto2?.Relationships);
+            Assert.Equal(dto.Relationships[0].Friendship, dto2.Relationships[0].Friendship);
+        }
+
         // Minimal DTO mirroring the perception JSON shape (funds + clock + lot_avatars + skills + job fields).
         // Uses JsonPropertyName to match the snake_case keys emitted by PerceptionEmitter.
         private sealed class PerceptionDto
@@ -467,6 +539,9 @@ namespace SimsVille.Tests
 
             [System.Text.Json.Serialization.JsonPropertyName("job")]
             public JobDto Job { get; set; }
+
+            [System.Text.Json.Serialization.JsonPropertyName("relationships")]
+            public List<RelationshipDto> Relationships { get; set; } = new();
         }
 
         private sealed class JobDto
@@ -509,6 +584,24 @@ namespace SimsVille.Tests
 
             [System.Text.Json.Serialization.JsonPropertyName("name")]
             public string Name { get; set; }
+        }
+
+        private sealed class RelationshipDto
+        {
+            [System.Text.Json.Serialization.JsonPropertyName("other_persist_id")]
+            public uint OtherPersistId { get; set; }
+
+            [System.Text.Json.Serialization.JsonPropertyName("other_name")]
+            public string OtherName { get; set; }
+
+            [System.Text.Json.Serialization.JsonPropertyName("friendship")]
+            public int Friendship { get; set; }
+
+            [System.Text.Json.Serialization.JsonPropertyName("family_tag")]
+            public string FamilyTag { get; set; }
+
+            [System.Text.Json.Serialization.JsonPropertyName("is_roommate")]
+            public bool IsRoommate { get; set; }
         }
 
         private sealed class SkillsDto

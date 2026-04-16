@@ -33,6 +33,7 @@ type Perception struct {
 	LotAvatars       []LotAvatar    `json:"lot_avatars"`
 	Skills           Skills         `json:"skills"`             // TS1 skill values (§reeims-edc)
 	Job              Job            `json:"job"`                // career state (§reeims-930)
+	Relationships    []Relationship `json:"relationships"`      // per-Sim relationship scores (§reeims-2eb)
 }
 
 // Motives holds the eight core motive values plus derived mood.
@@ -128,6 +129,22 @@ type LotAvatar struct {
 	Position         Position         `json:"position"`
 	CurrentAnimation string           `json:"current_animation"`
 	Motives          LotAvatarMotives `json:"motives"`
+}
+
+// Relationship describes the controlled Sim's relationship to another avatar (reeims-2eb).
+//
+// other_persist_id and other_name identify the counterpart.
+// friendship is RelVar[0] from VMEntity.MeToObject; range [-1000, 1000]; 0 when
+// no interaction has ever occurred.
+// family_tag is null in VMLocalDriver mode — TS1 family membership is stored in the
+// neighbourhood.iff NGBH chunk which is not loaded at runtime for in-lot perception.
+// is_roommate is true when the other avatar's VMTSOAvatarState.Permissions >= Roommate.
+type Relationship struct {
+	OtherPersistID uint32  `json:"other_persist_id"`
+	OtherName      string  `json:"other_name"`
+	Friendship     int     `json:"friendship"`
+	FamilyTag      *string `json:"family_tag"`  // null: not tracked at runtime (known gap)
+	IsRoommate     bool    `json:"is_roommate"`
 }
 
 // PathfindFailed is the JSON structure sent by the game when a pathfind fails

@@ -43,7 +43,10 @@ const fullPerceptionJSON = `{
 		}
 	],
 	"skills": {"cooking":500,"charisma":300,"mechanical":200,"creativity":750,"body":100,"logic":900},
-	"job": {"has_job":true,"career":null,"level":2,"salary":0,"work_hours":null}
+	"job": {"has_job":true,"career":null,"level":2,"salary":0,"work_hours":null},
+	"relationships": [
+		{"other_persist_id":2,"other_name":"Bob","friendship":250,"family_tag":null,"is_roommate":false}
+	]
 }`
 
 func TestPerception_FundsDeserialized(t *testing.T) {
@@ -569,5 +572,115 @@ func TestPerception_LotAvatars_MotivesRoundTrip(t *testing.T) {
 	}
 	if got.CurrentAnimation != want.CurrentAnimation {
 		t.Errorf("round-trip current_animation: expected %q, got %q", want.CurrentAnimation, got.CurrentAnimation)
+	}
+}
+
+// ── Relationships tests (reeims-2eb) ──────────────────────────────────────────
+
+func TestPerception_Relationships_Deserialized(t *testing.T) {
+	// Verify that a relationships array with one entry deserializes correctly.
+	var p Perception
+	if err := json.Unmarshal([]byte(fullPerceptionJSON), &p); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	if len(p.Relationships) != 1 {
+		t.Fatalf("expected 1 relationship, got %d", len(p.Relationships))
+	}
+
+	r := p.Relationships[0]
+	if r.OtherPersistID != 2 {
+		t.Errorf("expected OtherPersistID=2, got %d", r.OtherPersistID)
+	}
+	if r.OtherName != "Bob" {
+		t.Errorf("expected OtherName='Bob', got %q", r.OtherName)
+	}
+	if r.Friendship != 250 {
+		t.Errorf("expected Friendship=250, got %d", r.Friendship)
+	}
+	if r.FamilyTag != nil {
+		t.Errorf("expected FamilyTag=nil (known gap: not tracked at runtime), got %v", r.FamilyTag)
+	}
+	if r.IsRoommate {
+		t.Errorf("expected IsRoommate=false, got true")
+	}
+}
+
+func TestPerception_Relationships_EmptyWhenAbsent(t *testing.T) {
+	// JSON without a relationships field — empty slice expected (no interactions yet).
+	raw := []byte(`{
+		"type": "perception",
+		"persist_id": 1,
+		"sim_id": 42,
+		"name": "Daisy",
+		"funds": 0,
+		"clock": {"hours":0,"minutes":0,"seconds":0,"time_of_day":0,"day":0},
+		"motives": {"hunger":0,"comfort":0,"energy":0,"hygiene":0,"bladder":0,"room":0,"social":0,"fun":0,"mood":0},
+		"position": {"x":0,"y":0,"level":1},
+		"rotation": 0.0,
+		"current_animation": "",
+		"action_queue": [],
+		"nearby_objects": []
+	}`)
+
+	var p Perception
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	if len(p.Relationships) != 0 {
+		t.Errorf("expected empty relationships when field absent, got %d entries", len(p.Relationships))
+	}
+}
+
+func TestPerception_Relationships_MultiEntryRoundTrip(t *testing.T) {
+	// Construct a Perception with multiple relationships and verify marshal→unmarshal stability.
+	tag := "sibling"
+	original := Perception{
+		Type:      "perception",
+		PersistID: 1,
+		SimID:     10,
+		Name:      "Daisy",
+		Relationships: []Relationship{
+			{OtherPersistID: 2, OtherName: "Bob", Friendship: 500, FamilyTag: nil, IsRoommate: false},
+			{OtherPersistID: 3, OtherName: "Alice", Friendship: -200, FamilyTag: &tag, IsRoommate: true},
+			{OtherPersistID: 4, OtherName: "Charlie", Friendship: 0, FamilyTag: nil, IsRoommate: false},
+		},
+	}
+
+	encoded, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	var decoded Perception
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	if len(decoded.Relationships) != 3 {
+		t.Fatalf("round-trip: expected 3 relationships, got %d", len(decoded.Relationships))
+	}
+
+	for i, want := range original.Relationships {
+		got := decoded.Relationships[i]
+		if got.OtherPersistID != want.OtherPersistID {
+			t.Errorf("[%d] OtherPersistID: want %d, got %d", i, want.OtherPersistID, got.OtherPersistID)
+		}
+		if got.OtherName != want.OtherName {
+			t.Errorf("[%d] OtherName: want %q, got %q", i, want.OtherName, got.OtherName)
+		}
+		if got.Friendship != want.Friendship {
+			t.Errorf("[%d] Friendship: want %d, got %d", i, want.Friendship, got.Friendship)
+		}
+		if got.IsRoommate != want.IsRoommate {
+			t.Errorf("[%d] IsRoommate: want %v, got %v", i, want.IsRoommate, got.IsRoommate)
+		}
+		// FamilyTag: both nil or both point to equal strings
+		if (got.FamilyTag == nil) != (want.FamilyTag == nil) {
+			t.Errorf("[%d] FamilyTag nil mismatch: want %v, got %v", i, want.FamilyTag, got.FamilyTag)
+		} else if got.FamilyTag != nil && *got.FamilyTag != *want.FamilyTag {
+			t.Errorf("[%d] FamilyTag value: want %q, got %q", i, *want.FamilyTag, *got.FamilyTag)
+		}
 	}
 }
