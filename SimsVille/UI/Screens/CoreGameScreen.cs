@@ -39,7 +39,6 @@ using FSO.Vitaboy;
 using FSO.SimAntics.Model.TSOPlatform;
 using Microsoft.Xna.Framework.Graphics;
 using FSO.Files.Formats.IFF;
-using FSO.Debug;
 
 namespace FSO.Client.UI.Screens
 {
@@ -63,6 +62,54 @@ namespace FSO.Client.UI.Screens
         private Queue<SimConnectStateChange> StateChanges;
         private UIMouseEventRef MouseHitAreaEventRef = null;
         private Neighborhood CityRenderer; //city view
+
+        private bool _AutoLotLoadAttempted = false;
+        private int _AutoLotLoadCountdown = 60; //wait ~1s of frames for scene to settle
+
+        // --- Thunk pattern for agent-initiated lot loads (reeims-e8e) ---
+        //
+        // External agents call VMNetLoadLotCmd.Execute from the VM tick thread
+        // (inside VMIPCDriver.Tick). Directly invoking LoadLotByXmlName from
+        // that thread would mutate the world that the VM is actively ticking,
+        // so we queue a request via the static thunk below. CoreGameScreen.Update
+        // (on the UI thread) consumes the request at the start of each tick.
+        //
+        // volatile write + lock on _lotLoadLock is sufficient: we don't need a
+        // full queue because multiple in-flight load requests within a single
+        // frame coalesce to "the most recent one" — an agent that issues two
+        // load-lots in quick succession is expressing intent to end up on the
+        // second one, not both.
+        private static readonly object _lotLoadLock = new object();
+        private static volatile string _pendingLotLoad = null;
+
+        /// <summary>
+        /// Request a lot load from any thread (typically the VM tick thread inside
+        /// VMIPCDriver). The request is consumed by CoreGameScreen.Update on the
+        /// UI thread. Safe to call when no CoreGameScreen instance exists — the
+        /// request just stays pending until one is created.
+        /// </summary>
+        public static void RequestLotLoad(string xmlName)
+        {
+            if (string.IsNullOrEmpty(xmlName)) return;
+            lock (_lotLoadLock)
+            {
+                _pendingLotLoad = xmlName;
+            }
+        }
+
+        /// <summary>
+        /// Internal: consume a pending lot load request (test-visible).
+        /// Returns the requested xml name, or null if none pending. Clears the slot.
+        /// </summary>
+        internal static string ConsumePendingLotLoad()
+        {
+            lock (_lotLoadLock)
+            {
+                var v = _pendingLotLoad;
+                _pendingLotLoad = null;
+                return v;
+            }
+        }
 
         public UILotControl LotController; //world, lotcontrol and vm will be null if we aren't in a lot.
         private LotView.World World;
@@ -362,6 +409,53 @@ namespace FSO.Client.UI.Screens
 
             base.Update(state);
 
+            // AGENT LOT LOAD (reeims-e8e): consume any pending load request from
+            // VMNetLoadLotCmd.Execute. Runs before vm.Update so we tear down the
+            // VM *before* the same frame's tick would otherwise mutate it.
+            var pendingXml = ConsumePendingLotLoad();
+            if (pendingXml != null)
+            {
+                try
+                {
+                    LoadLotByXmlName(pendingXml);
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine("[loadlot] EXCEPTION for " + pendingXml + ": " + ex);
+                }
+            }
+
+            //AUTO-LOAD: headless baseline harness — pick first character + first house and enter lot view.
+            if (!_AutoLotLoadAttempted && vm == null)
+            {
+                if (_AutoLotLoadCountdown-- <= 0)
+                {
+                    _AutoLotLoadAttempted = true;
+                    try
+                    {
+                        var charDir = Path.Combine(FSOEnvironment.ContentDir ?? "Content", "Characters");
+                        var houseDir = Path.Combine(FSOEnvironment.ContentDir ?? "Content", "Houses");
+                        if (!Directory.Exists(charDir)) charDir = "Content/Characters/";
+                        if (!Directory.Exists(houseDir)) houseDir = "Content/Houses/";
+                        var charFiles = Directory.GetFiles(charDir, "*.xml");
+                        var houseFiles = Directory.GetFiles(houseDir, "*.xml");
+                        Console.Error.WriteLine("[autoload] charFiles=" + charFiles.Length + " houseFiles=" + houseFiles.Length);
+                        if (charFiles.Length > 0 && houseFiles.Length > 0)
+                        {
+                            gizmo.SelectedCharInfo = XmlCharacter.Parse(charFiles[0]);
+                            var houseXml = houseFiles.FirstOrDefault(f => f.EndsWith("house1.xml")) ?? houseFiles[0];
+                            Console.Error.WriteLine("[autoload] char=" + charFiles[0] + " house=" + houseXml);
+                            InitTestLot(houseXml, Path.GetFileName(houseXml), true, false);
+                            Console.Error.WriteLine("[autoload] InitTestLot returned. vm=" + (vm != null) + " World=" + (World != null) + " ZoomLevel=" + ZoomLevel);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine("[autoload] EXCEPTION: " + ex);
+                    }
+                }
+            }
+
 
             lock (StateChanges)
             {
@@ -473,6 +567,117 @@ namespace FSO.Client.UI.Screens
             Connecting = false;
         }
 
+        /// <summary>
+        /// Loads a lot by XML filename (reeims-e8e). Resolves <paramref name="xmlName"/>
+        /// relative to the Content/Houses directory, cancels all in-flight VM actions,
+        /// tears down the current VM/World/LotController, and loads the new blueprint
+        /// via InitTestLot. Must be called on the UI thread.
+        ///
+        /// Disables the auto-load countdown so subsequent idle ticks don't re-fire
+        /// the baseline auto-load path on top of the agent-requested lot.
+        /// </summary>
+        public void LoadLotByXmlName(string xmlName)
+        {
+            if (string.IsNullOrEmpty(xmlName))
+            {
+                Console.Error.WriteLine("[loadlot] empty xmlName, ignoring");
+                return;
+            }
+
+            // Resolve path. Accept both bare "house2.xml" and absolute paths.
+            string housePath;
+            if (Path.IsPathRooted(xmlName) && File.Exists(xmlName))
+            {
+                housePath = xmlName;
+            }
+            else
+            {
+                var houseDir = Path.Combine(FSOEnvironment.ContentDir ?? "Content", "Houses");
+                if (!Directory.Exists(houseDir)) houseDir = "Content/Houses/";
+                housePath = Path.Combine(houseDir, xmlName);
+            }
+
+            if (!File.Exists(housePath))
+            {
+                Console.Error.WriteLine("[loadlot] house xml not found: " + housePath);
+                return;
+            }
+
+            Console.Error.WriteLine("[loadlot] request: " + xmlName + " -> " + housePath);
+
+            // Cancel all queued/active actions on every avatar BEFORE teardown.
+            // This prevents crashes from mid-action destruction during Reset().
+            if (vm != null)
+            {
+                try
+                {
+                    foreach (var ent in vm.Entities.ToList())
+                    {
+                        var th = ent?.Thread;
+                        if (th == null) continue;
+                        try
+                        {
+                            // Snapshot queue to a list before iterating — CancelAction
+                            // may mutate the queue during iteration.
+                            var queueSnapshot = th.Queue?.ToList();
+                            if (queueSnapshot != null)
+                            {
+                                foreach (var action in queueSnapshot)
+                                {
+                                    if (action != null)
+                                        th.CancelAction(action.UID);
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.Error.WriteLine("[loadlot] cancel-all error on entity " + ent.ObjectID + ": " + ex.Message);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine("[loadlot] cancel-all outer error: " + ex);
+                }
+            }
+
+            // Disable auto-load countdown so it doesn't re-fire on the new lot.
+            _AutoLotLoadAttempted = true;
+
+            // Pick a reasonable default character if one isn't already selected.
+            // On first agent-triggered load after a fresh boot (auto-load skipped),
+            // gizmo.SelectedCharInfo may be null.
+            if (gizmo.SelectedCharInfo == null)
+            {
+                try
+                {
+                    var charDir = Path.Combine(FSOEnvironment.ContentDir ?? "Content", "Characters");
+                    if (!Directory.Exists(charDir)) charDir = "Content/Characters/";
+                    var charFiles = Directory.GetFiles(charDir, "*.xml");
+                    if (charFiles.Length > 0)
+                        gizmo.SelectedCharInfo = XmlCharacter.Parse(charFiles[0]);
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine("[loadlot] default char selection failed: " + ex.Message);
+                }
+            }
+
+            if (gizmo.SelectedCharInfo == null)
+            {
+                Console.Error.WriteLine("[loadlot] no character available, aborting");
+                return;
+            }
+
+            // InitTestLot already calls CleanupLastWorld when vm != null, so we
+            // don't need an explicit teardown here — just delegate. The result:
+            // old VM closes, new VM is constructed, new blueprint loads, new
+            // simJoin command places the agent's Sim.
+            InitTestLot(housePath, Path.GetFileName(housePath), true, false);
+
+            Console.Error.WriteLine("[loadlot] done. vm=" + (vm != null) + " world=" + (World != null));
+        }
+
         public void InitTestLot(string path, string name, bool host, bool TS1)
         {
             if (Connecting) return;
@@ -518,10 +723,13 @@ namespace FSO.Client.UI.Screens
 
 
             VMNetDriver driver;
-            if (host )
+            if (Environment.GetEnvironmentVariable("FREESIMS_IPC") == "1")
             {
-
-                driver = new VMServerDriver(37564, null);
+                driver = new VMIPCDriver();
+            }
+            else if (host)
+            {
+                driver = new VMLocalDriver();
             }
             else
             {
@@ -534,7 +742,7 @@ namespace FSO.Client.UI.Screens
 
                 UIScreen.ShowDialog(ConnectingDialog, true);
 
-                driver = new VMClientDriver(path, 37564, ClientStateChange);
+                driver = new VMLocalDriver();
             }
 
            
@@ -681,17 +889,8 @@ namespace FSO.Client.UI.Screens
 
         private void VMDebug_OnButtonClick(UIElement button)
         {
-            
-            if (vm != null) 
-            {
-                var debugTools = new Simantics(vm);
-
-                var window = GameFacade.Game.Window;
-                debugTools.Show();
-                debugTools.Location = new System.Drawing.Point(window.ClientBounds.X + window.ClientBounds.Width, window.ClientBounds.Y);
-                debugTools.UpdateAQLocation();
-            }
-
+            // WinForms-based Simantics debug panel is excluded from the Linux build.
+            // The button remains in the UI but is a no-op for now.
         }
 
         private void CreateChar_OnButtonClick(UIElement button)

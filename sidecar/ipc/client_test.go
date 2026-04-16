@@ -575,6 +575,122 @@ func TestQueryCatalogRoundTrip(t *testing.T) {
 	}
 }
 
+// TestLoadLotRoundTrip (reeims-e8e) simulates the load-lot → queued response path:
+//
+//  1. Client sends a LoadLotCmd with RequestID="ll1" and HouseXml="house2.xml" over a real Unix socket.
+//  2. Fake-game reads the frame and verifies the wire format:
+//     [type=37][uid LE][hasReq=1][len+"ll1"][len+"house2.xml"]
+//  3. Fake-game sends back a "queued" response carrying payload.house_xml.
+//  4. Verify the client dispatches it to ResponseCh with matching request_id.
+func TestLoadLotRoundTrip(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "loadlot.sock")
+
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		accepted <- conn
+	}()
+
+	client := NewClient(sockPath)
+	defer client.Close()
+
+	go func() {
+		_ = client.Connect()
+	}()
+
+	var gameConn net.Conn
+	select {
+	case gameConn = <-accepted:
+		defer gameConn.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for client connect")
+	}
+
+	const reqID = "ll1"
+	const houseXml = "house2.xml"
+	cmd := &LoadLotCmd{ActorUID: 42, HouseXml: houseXml, RequestID: reqID}
+	payload, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal("serialize:", err)
+	}
+	if err := client.SendFrame(payload); err != nil {
+		t.Fatal("send:", err)
+	}
+
+	gameConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var lenBuf [4]byte
+	if _, err := readFull(gameConn, lenBuf[:]); err != nil {
+		t.Fatal("read frame length:", err)
+	}
+	frameLen := binary.LittleEndian.Uint32(lenBuf[:])
+	frameBuf := make([]byte, frameLen)
+	if _, err := readFull(gameConn, frameBuf); err != nil {
+		t.Fatal("read frame payload:", err)
+	}
+
+	// Verify: [type=37][ActorUID=42 LE][hasReq=1][len(3)+"ll1"][len(10)+"house2.xml"]
+	if frameBuf[0] != byte(CmdLoadLot) {
+		t.Fatalf("type byte = %d, want %d (CmdLoadLot=37)", frameBuf[0], CmdLoadLot)
+	}
+	actorUID := binary.LittleEndian.Uint32(frameBuf[1:5])
+	if actorUID != 42 {
+		t.Errorf("ActorUID = %d, want 42", actorUID)
+	}
+	if frameBuf[5] != 1 {
+		t.Errorf("hasRequestID = %d, want 1", frameBuf[5])
+	}
+	if frameBuf[6] != 3 {
+		t.Errorf("requestID length = %d, want 3", frameBuf[6])
+	}
+	if string(frameBuf[7:10]) != reqID {
+		t.Errorf("requestID = %q, want %q", string(frameBuf[7:10]), reqID)
+	}
+	if frameBuf[10] != 10 {
+		t.Errorf("house_xml length = %d, want 10", frameBuf[10])
+	}
+	if string(frameBuf[11:21]) != houseXml {
+		t.Errorf("house_xml = %q, want %q", string(frameBuf[11:21]), houseXml)
+	}
+
+	// Simulate the game emitting the "queued" response.
+	respJSON := `{"type":"response","request_id":"ll1","status":"queued","payload":{"house_xml":"house2.xml"}}`
+	respFrame := make([]byte, 4+len(respJSON))
+	binary.LittleEndian.PutUint32(respFrame[0:4], uint32(len(respJSON)))
+	copy(respFrame[4:], respJSON)
+	if _, err := gameConn.Write(respFrame); err != nil {
+		t.Fatal("write response frame:", err)
+	}
+
+	select {
+	case rf := <-client.ResponseCh:
+		if rf.RequestID != reqID {
+			t.Errorf("ResponseFrame.RequestID = %q, want %q", rf.RequestID, reqID)
+		}
+		if rf.Status != "queued" {
+			t.Errorf("ResponseFrame.Status = %q, want queued", rf.Status)
+		}
+		var payloadMap map[string]interface{}
+		if err := json.Unmarshal(rf.Payload, &payloadMap); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		got, _ := payloadMap["house_xml"].(string)
+		if got != houseXml {
+			t.Errorf("payload.house_xml = %q, want %q", got, houseXml)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for load-lot response on ResponseCh")
+	}
+}
+
 func readFull(conn net.Conn, buf []byte) (int, error) {
 	total := 0
 	for total < len(buf) {

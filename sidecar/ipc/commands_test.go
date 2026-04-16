@@ -511,3 +511,125 @@ func TestQueryCatalogCmdType_Is36(t *testing.T) {
 		t.Errorf("CmdQueryCatalog byte value = %d, want 36", byte(CmdQueryCatalog))
 	}
 }
+
+// --- LoadLotCmd tests (reeims-e8e) ---
+
+func TestLoadLotCmdType_Is37(t *testing.T) {
+	cmd := &LoadLotCmd{}
+	if cmd.CmdType() != CmdLoadLot {
+		t.Errorf("CmdType() = %d, want %d", cmd.CmdType(), CmdLoadLot)
+	}
+	if byte(CmdLoadLot) != 37 {
+		t.Errorf("CmdLoadLot byte value = %d, want 37", byte(CmdLoadLot))
+	}
+}
+
+func TestLoadLotCmdSerialize_NoRequestID(t *testing.T) {
+	cmd := &LoadLotCmd{ActorUID: 1, HouseXml: "house2.xml"}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Layout: [type=37][uid:4][hasReq=0][7bit-len(10)+"house2.xml"]
+	// Total: 1 + 4 + 1 + 1 + 10 = 17
+	if data[0] != byte(CmdLoadLot) {
+		t.Errorf("type byte = %d, want %d", data[0], CmdLoadLot)
+	}
+
+	uid := binary.LittleEndian.Uint32(data[1:5])
+	if uid != 1 {
+		t.Errorf("ActorUID = %d, want 1", uid)
+	}
+
+	// hasRequestID flag at offset 5 should be 0
+	if data[5] != 0 {
+		t.Errorf("hasRequestID = %d, want 0", data[5])
+	}
+
+	// house_xml length byte (7-bit encoded 10)
+	if data[6] != 10 {
+		t.Errorf("house_xml length = %d, want 10", data[6])
+	}
+
+	houseXml := string(data[7:17])
+	if houseXml != "house2.xml" {
+		t.Errorf("house_xml = %q, want %q", houseXml, "house2.xml")
+	}
+
+	if len(data) != 17 {
+		t.Errorf("total length = %d, want 17", len(data))
+	}
+}
+
+func TestLoadLotCmdSerialize_WithRequestID(t *testing.T) {
+	cmd := &LoadLotCmd{ActorUID: 28, HouseXml: "house2.xml", RequestID: "ll1"}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Layout: [type=37][uid:4][hasReq=1][7bit-len(3)+"ll1"][7bit-len(10)+"house2.xml"]
+	// Total: 1 + 4 + 1 + 1 + 3 + 1 + 10 = 21
+	if data[0] != byte(CmdLoadLot) {
+		t.Errorf("type byte = %d, want %d", data[0], CmdLoadLot)
+	}
+
+	uid := binary.LittleEndian.Uint32(data[1:5])
+	if uid != 28 {
+		t.Errorf("ActorUID = %d, want 28", uid)
+	}
+
+	// hasRequestID flag at offset 5 should be 1
+	if data[5] != 1 {
+		t.Errorf("hasRequestID = %d, want 1", data[5])
+	}
+
+	// requestID length at offset 6
+	if data[6] != 3 {
+		t.Errorf("requestID length = %d, want 3", data[6])
+	}
+	if string(data[7:10]) != "ll1" {
+		t.Errorf("requestID = %q, want %q", string(data[7:10]), "ll1")
+	}
+
+	// house_xml length at offset 10
+	if data[10] != 10 {
+		t.Errorf("house_xml length = %d, want 10", data[10])
+	}
+	if string(data[11:21]) != "house2.xml" {
+		t.Errorf("house_xml = %q, want %q", string(data[11:21]), "house2.xml")
+	}
+
+	if len(data) != 21 {
+		t.Errorf("total length = %d, want 21", len(data))
+	}
+}
+
+func TestLoadLotCmdSerialize_RequestIDBeforeHouseXml(t *testing.T) {
+	// Regression test: the item spec is explicit that the layout is
+	// [type=37][uid:4][hasReq=1][7bit-len+requestID][7bit-len+house_xml]
+	// i.e. RequestID comes BEFORE HouseXml (not after, as the standard
+	// RequestID tail does in other commands). This catches a swap.
+	cmd := &LoadLotCmd{ActorUID: 1, HouseXml: "x", RequestID: "r"}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Expected bytes:
+	//   data[0] = 37 (type)
+	//   data[1..4] = 1 (uid LE)
+	//   data[5]   = 1 (hasReq)
+	//   data[6]   = 1 (len("r"))
+	//   data[7]   = 'r'
+	//   data[8]   = 1 (len("x"))
+	//   data[9]   = 'x'
+	// If we serialized in the wrong order (house_xml first), data[6] would be 1
+	// but data[7] would be 'x' (not 'r').
+	if data[7] != 'r' {
+		t.Errorf("byte after requestID length should be 'r', got 0x%02x", data[7])
+	}
+	if data[9] != 'x' {
+		t.Errorf("byte after house_xml length should be 'x', got 0x%02x", data[9])
+	}
+}
