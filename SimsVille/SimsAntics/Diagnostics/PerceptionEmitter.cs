@@ -178,6 +178,40 @@ namespace FSO.SimAntics.Diagnostics
                     body       = avatar.GetPersonData(VMPersonDataVariable.BodySkill),
                     logic      = avatar.GetPersonData(VMPersonDataVariable.LogicSkill),
                 },
+                // Job state (reeims-930).
+                // JobType (PersonData[56]): 0 = unemployed, >0 = career track ID (CARR chunk ID).
+                // JobPromotionLevel (PersonData[57]): 0-based level within career track.
+                // Career name and salary lookups require TS1JobProvider (Content.Jobs), which is
+                // currently commented out in Content.cs. Those fields are null until wired — known gap.
+                // Work hours (start/end) are stored in CARR.JobLevel — also unavailable without provider.
+                job = BuildJobPayload(avatar),
+            };
+        }
+        /// <summary>
+        /// Builds the job sub-object for a Sim's perception payload (reeims-930).
+        ///
+        /// JobType (PersonData[56]) is the CARR chunk ID of the active career track; 0 means
+        /// unemployed. JobPromotionLevel (PersonData[57]) is the 0-based level within that track.
+        ///
+        /// Career name, salary, and work-hour lookup require TS1JobProvider (Content.Jobs), which
+        /// is commented out in Content.cs — this fork does not currently initialise it. Those fields
+        /// are emitted as null/0 and flagged as a known gap in the commit body.
+        /// </summary>
+        private static object BuildJobPayload(VMAvatar avatar)
+        {
+            var jobType  = avatar.GetPersonData(VMPersonDataVariable.JobType);
+            var jobLevel = avatar.GetPersonData(VMPersonDataVariable.JobPromotionLevel);
+            bool hasJob  = jobType > 0;
+
+            return new
+            {
+                has_job  = hasJob,
+                // career is null: TS1JobProvider not wired — CARR name lookup unavailable (known gap)
+                career   = (string)null,
+                level    = hasJob ? (int)jobLevel : 0,
+                // salary and work_hours are null: require TS1JobProvider (known gap)
+                salary   = 0,
+                work_hours = (object)null,
             };
         }
     }

@@ -93,6 +93,13 @@ namespace SimsVille.Tests
                     "creativity": 750,
                     "body": 100,
                     "logic": 900
+                },
+                "job": {
+                    "has_job": true,
+                    "career": null,
+                    "level": 2,
+                    "salary": 0,
+                    "work_hours": null
                 }
             }
             """;
@@ -385,7 +392,58 @@ namespace SimsVille.Tests
                 "max skill value 1000 must fit in int16 (PersonData is short[])");
         }
 
-        // Minimal DTO mirroring the perception JSON shape (funds + clock + lot_avatars + skills fields).
+        // ── Job tests (reeims-930) ─────────────────────────────────────────────
+
+        [Fact]
+        public void PerceptionJson_ContainsJobField()
+        {
+            using var doc = JsonDocument.Parse(SamplePerceptionJson);
+            Assert.True(doc.RootElement.TryGetProperty("job", out var elem),
+                "perception JSON must contain a 'job' property");
+            Assert.Equal(JsonValueKind.Object, elem.ValueKind);
+        }
+
+        [Fact]
+        public void PerceptionJson_JobShape_HasRequiredFields()
+        {
+            using var doc = JsonDocument.Parse(SamplePerceptionJson);
+            var job = doc.RootElement.GetProperty("job");
+
+            Assert.True(job.TryGetProperty("has_job",    out _), "job must have 'has_job'");
+            Assert.True(job.TryGetProperty("career",     out _), "job must have 'career'");
+            Assert.True(job.TryGetProperty("level",      out _), "job must have 'level'");
+            Assert.True(job.TryGetProperty("salary",     out _), "job must have 'salary'");
+            Assert.True(job.TryGetProperty("work_hours", out _), "job must have 'work_hours'");
+        }
+
+        [Fact]
+        public void PerceptionJson_JobHasJob_IsBoolean()
+        {
+            using var doc = JsonDocument.Parse(SamplePerceptionJson);
+            var hasJob = doc.RootElement.GetProperty("job").GetProperty("has_job");
+            Assert.Equal(JsonValueKind.True, hasJob.ValueKind);
+        }
+
+        [Fact]
+        public void PerceptionJson_JobCareer_IsNullAndKnownGap()
+        {
+            // TS1JobProvider is not wired in this fork — career name lookup is a known gap.
+            // career must be emitted as JSON null until the provider is wired.
+            using var doc = JsonDocument.Parse(SamplePerceptionJson);
+            var career = doc.RootElement.GetProperty("job").GetProperty("career");
+            Assert.Equal(JsonValueKind.Null, career.ValueKind);
+        }
+
+        [Fact]
+        public void PerceptionJson_JobLevel_IsInteger()
+        {
+            using var doc = JsonDocument.Parse(SamplePerceptionJson);
+            var level = doc.RootElement.GetProperty("job").GetProperty("level");
+            Assert.Equal(JsonValueKind.Number, level.ValueKind);
+            Assert.Equal(2, level.GetInt32());
+        }
+
+        // Minimal DTO mirroring the perception JSON shape (funds + clock + lot_avatars + skills + job fields).
         // Uses JsonPropertyName to match the snake_case keys emitted by PerceptionEmitter.
         private sealed class PerceptionDto
         {
@@ -406,6 +464,24 @@ namespace SimsVille.Tests
 
             [System.Text.Json.Serialization.JsonPropertyName("skills")]
             public SkillsDto Skills { get; set; }
+
+            [System.Text.Json.Serialization.JsonPropertyName("job")]
+            public JobDto Job { get; set; }
+        }
+
+        private sealed class JobDto
+        {
+            [System.Text.Json.Serialization.JsonPropertyName("has_job")]
+            public bool HasJob { get; set; }
+
+            [System.Text.Json.Serialization.JsonPropertyName("career")]
+            public string Career { get; set; }
+
+            [System.Text.Json.Serialization.JsonPropertyName("level")]
+            public int Level { get; set; }
+
+            [System.Text.Json.Serialization.JsonPropertyName("salary")]
+            public int Salary { get; set; }
         }
 
         private sealed class ClockDto

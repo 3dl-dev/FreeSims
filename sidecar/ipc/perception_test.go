@@ -42,7 +42,8 @@ const fullPerceptionJSON = `{
 			"motives": {"hunger":-50,"comfort":30,"energy":60,"hygiene":20,"bladder":-10,"social":40,"fun":55,"mood":25}
 		}
 	],
-	"skills": {"cooking":500,"charisma":300,"mechanical":200,"creativity":750,"body":100,"logic":900}
+	"skills": {"cooking":500,"charisma":300,"mechanical":200,"creativity":750,"body":100,"logic":900},
+	"job": {"has_job":true,"career":null,"level":2,"salary":0,"work_hours":null}
 }`
 
 func TestPerception_FundsDeserialized(t *testing.T) {
@@ -420,6 +421,98 @@ func TestPerception_Skills_RoundTrip(t *testing.T) {
 
 	if decoded.Skills != original.Skills {
 		t.Errorf("round-trip skills: expected %+v, got %+v", original.Skills, decoded.Skills)
+	}
+}
+
+// ── Job tests (reeims-930) ────────────────────────────────────────────────────
+
+func TestPerception_Job_Deserialized(t *testing.T) {
+	var p Perception
+	if err := json.Unmarshal([]byte(fullPerceptionJSON), &p); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	if !p.Job.HasJob {
+		t.Errorf("expected Job.HasJob=true, got false")
+	}
+	if p.Job.Career != nil {
+		t.Errorf("expected Job.Career=nil (known gap: TS1JobProvider not wired), got %v", p.Job.Career)
+	}
+	if p.Job.Level != 2 {
+		t.Errorf("expected Job.Level=2, got %d", p.Job.Level)
+	}
+	if p.Job.Salary != 0 {
+		t.Errorf("expected Job.Salary=0 (known gap: TS1JobProvider not wired), got %d", p.Job.Salary)
+	}
+	if p.Job.WorkHours != nil {
+		t.Errorf("expected Job.WorkHours=nil (known gap: TS1JobProvider not wired), got %v", p.Job.WorkHours)
+	}
+}
+
+func TestPerception_Job_HasJobFalseWhenUnemployed(t *testing.T) {
+	// Verify that has_job=false is correctly parsed for an unemployed Sim.
+	raw := []byte(`{
+		"type": "perception",
+		"persist_id": 1,
+		"sim_id": 42,
+		"name": "Daisy",
+		"funds": 0,
+		"clock": {"hours":0,"minutes":0,"seconds":0,"time_of_day":0,"day":0},
+		"motives": {"hunger":0,"comfort":0,"energy":0,"hygiene":0,"bladder":0,"room":0,"social":0,"fun":0,"mood":0},
+		"position": {"x":0,"y":0,"level":1},
+		"rotation": 0.0,
+		"current_animation": "",
+		"action_queue": [],
+		"nearby_objects": [],
+		"skills": {"cooking":0,"charisma":0,"mechanical":0,"creativity":0,"body":0,"logic":0},
+		"job": {"has_job":false,"career":null,"level":0,"salary":0,"work_hours":null}
+	}`)
+
+	var p Perception
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	if p.Job.HasJob {
+		t.Errorf("expected Job.HasJob=false for unemployed Sim, got true")
+	}
+	if p.Job.Level != 0 {
+		t.Errorf("expected Job.Level=0 for unemployed Sim, got %d", p.Job.Level)
+	}
+}
+
+func TestPerception_Job_RoundTrip(t *testing.T) {
+	original := Perception{
+		Type:      "perception",
+		PersistID: 1,
+		SimID:     42,
+		Name:      "Daisy",
+		Job: Job{
+			HasJob: true,
+			Career: nil,
+			Level:  3,
+			Salary: 0,
+		},
+	}
+
+	encoded, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	var decoded Perception
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	if decoded.Job.HasJob != original.Job.HasJob {
+		t.Errorf("round-trip Job.HasJob: expected %v, got %v", original.Job.HasJob, decoded.Job.HasJob)
+	}
+	if decoded.Job.Career != original.Job.Career {
+		t.Errorf("round-trip Job.Career: expected nil, got %v", decoded.Job.Career)
+	}
+	if decoded.Job.Level != original.Job.Level {
+		t.Errorf("round-trip Job.Level: expected %d, got %d", original.Job.Level, decoded.Job.Level)
 	}
 }
 
