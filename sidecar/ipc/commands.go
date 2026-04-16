@@ -29,6 +29,7 @@ const (
 	CmdGoto              VMCommandType = 10
 	CmdChangeLotSize     VMCommandType = 25
 	CmdQueryCatalog      VMCommandType = 36
+	CmdLoadLot           VMCommandType = 37
 )
 
 // ArchCommandType mirrors the C# VMArchitectureCommandType enum (byte).
@@ -413,5 +414,59 @@ func (c *QueryCatalogCmd) Serialize(buf *bytes.Buffer) error {
 	}
 	writeBinaryString(buf, cat)
 	writeRequestIDTail(buf, c.RequestID)
+	return nil
+}
+
+// --- LoadLot command (reeims-e8e) ---
+//
+// LoadLotCmd instructs the game to tear down the current lot/VM/blueprint
+// and load a different house XML by filename (relative to Content/Houses/).
+//
+// Wire format (after VMCommandType byte):
+//
+//	[ActorUID: 4 bytes LE]
+//	[hasRequestID: 1 byte]            (0 or 1)
+//	[if 1: 7-bit-length-prefixed UTF-8 requestID]
+//	[houseXml: 7-bit-length-prefixed UTF-8 string]
+//
+// Note that RequestID is emitted BEFORE HouseXml here (not after, as the
+// standard RequestID tail does). This matches the item spec's layout:
+//
+//	[type=37][uid:4][hasReq=1][7bit-len+requestID][7bit-len+house_xml]
+//
+// The game queues the load onto the UI thread via CoreGameScreen.RequestLotLoad
+// and immediately emits a "queued" response frame:
+//
+//	{"type":"response","request_id":"...","status":"queued","payload":{"house_xml":"..."}}
+//
+// The actual lot reload completes on a subsequent UI tick. A follow-up
+// "loaded" response after teardown+reload is NOT emitted in this version —
+// agents can detect completion by waiting for a perception event from the
+// new lot (different nearby_objects) or by polling query-lot-state.
+//
+// Sim persistence: the caller's Sim PersistID does NOT survive the lot reload
+// in this version — InitTestLot generates a new random MyUID and the old VM's
+// avatars are destroyed. The external agent must re-sync via a fresh SimJoin.
+type LoadLotCmd struct {
+	ActorUID  uint32
+	HouseXml  string
+	RequestID string // optional correlation ID
+}
+
+func (c *LoadLotCmd) CmdType() VMCommandType { return CmdLoadLot }
+
+func (c *LoadLotCmd) Serialize(buf *bytes.Buffer) error {
+	writeActorUID(buf, c.ActorUID)
+
+	// RequestID tail FIRST (before HouseXml) per the item spec.
+	if c.RequestID == "" {
+		buf.WriteByte(0)
+	} else {
+		buf.WriteByte(1)
+		writeBinaryString(buf, c.RequestID)
+	}
+
+	// HouseXml last.
+	writeBinaryString(buf, c.HouseXml)
 	return nil
 }

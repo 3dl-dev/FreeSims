@@ -42,6 +42,7 @@ namespace FSO.SimAntics.NetPlay.Model
             { VMCommandType.EODMessage, typeof(VMNetEODMessageCmd) },
             { VMCommandType.SetRoof, typeof(VMNetSetRoofCmd) },
             { VMCommandType.QueryCatalog, typeof(VMNetQueryCatalogCmd) },
+            { VMCommandType.LoadLot, typeof(VMNetLoadLotCmd) },
 
         };
         public static Dictionary<Type, VMCommandType> ReverseMap = CmdMap.ToDictionary(x => x.Value, x => x.Key);
@@ -134,6 +135,14 @@ namespace FSO.SimAntics.NetPlay.Model
         /// Query the object catalog (reeims-af0). Returns up to 500 entries with
         /// {guid, name, price, category, subcategory} as a JSON response frame.
         /// </summary>
-        QueryCatalog = 36
+        QueryCatalog = 36,
+
+        /// <summary>
+        /// Load a different lot by house XML filename (reeims-e8e). Tears down
+        /// the current VM/World/Blueprint and loads the named blueprint on the
+        /// UI thread via CoreGameScreen.RequestLotLoad. Emits a "queued" response
+        /// frame immediately; does not block the VM tick thread.
+        /// </summary>
+        LoadLot = 37
     }
 }

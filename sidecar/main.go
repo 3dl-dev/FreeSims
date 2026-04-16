@@ -70,6 +70,9 @@ type jsonCommand struct {
 
 	// QueryCatalog fields
 	Category string `json:"category,omitempty"`
+
+	// LoadLot fields
+	HouseXml string `json:"house_xml,omitempty"`
 }
 
 // jsonArchOp mirrors ipc.ArchOp for JSON decoding.
@@ -329,6 +332,16 @@ func parseCommand(jcmd jsonCommand) (ipc.Command, error) {
 		return &ipc.QueryCatalogCmd{
 			ActorUID:  jcmd.ActorUID,
 			Category:  cat,
+			RequestID: jcmd.RequestID,
+		}, nil
+
+	case "load-lot":
+		if jcmd.HouseXml == "" {
+			return nil, fmt.Errorf("load-lot command requires non-empty 'house_xml'")
+		}
+		return &ipc.LoadLotCmd{
+			ActorUID:  jcmd.ActorUID,
+			HouseXml:  jcmd.HouseXml,
 			RequestID: jcmd.RequestID,
 		}, nil
 

@@ -303,6 +303,24 @@ namespace FSO.SimAntics.NetPlay.Drivers
             SendResponseFrameWithPayload(requestId, "ok", payloadJson);
         }
 
+        /// <summary>
+        /// Emits a response frame for a LoadLot command (reeims-e8e).
+        /// status is typically "queued" (load dispatched to UI thread) or "error".
+        /// detail carries either the house XML filename (on queued) or an error message.
+        /// Format: {"type":"response","request_id":"...","status":"queued","payload":{"house_xml":"..."}}
+        ///      or {"type":"response","request_id":"...","status":"error","payload":{"error":"..."}}
+        /// </summary>
+        internal void SendLoadLotResponse(string requestId, string status, string detail)
+        {
+            var escapedDetail = (detail ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
+            string payloadJson;
+            if (status == "queued")
+                payloadJson = "{\"house_xml\":\"" + escapedDetail + "\"}";
+            else
+                payloadJson = "{\"error\":\"" + escapedDetail + "\"}";
+            SendResponseFrameWithPayload(requestId, status, payloadJson);
+        }
+
         private void SendResponseFrameWithPayload(string requestId, string status, string payloadJson)
         {
             if (_client == null) return;

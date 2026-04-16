@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  house2.xml — alternate minimal lot for reeims-e8e "load-lot" IPC command.
+
+  Deliberately different from house1.xml:
+   * No interior wall partitions at all (one big room).
+   * Single small floor patch rather than the sprawling multi-room layout.
+   * Object count reduced to 2 (vs house1's 46) to make a visible perception
+     diff when nearby_objects is queried after the reload.
+
+  Coordinate system matches house1.xml: size=64 (a 64x64 tile lot), level 0 is
+  the ground, tiles are 1-indexed. Floors and walls are addressable per-tile.
+
+  Object GUIDs reused from house1 (0x6271EFF3, 0x3184835C) so they're guaranteed
+  to exist in the TSO content catalog — these are the two "parked at -2048,-2048"
+  stub objects that house1.xml also uses.
+-->
+<house xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <name>house2</name>
+  <size>64</size>
+  <category>103</category>
+  <timeofday>6</timeofday>
+  <world>
+    <floors>
+      <floor level="0" x="30" y="30" value="9" />
+      <floor level="0" x="31" y="30" value="9" />
+      <floor level="0" x="32" y="30" value="9" />
+      <floor level="0" x="33" y="30" value="9" />
+      <floor level="0" x="30" y="31" value="9" />
+      <floor level="0" x="31" y="31" value="9" />
+      <floor level="0" x="32" y="31" value="9" />
+      <floor level="0" x="33" y="31" value="9" />
+      <floor level="0" x="30" y="32" value="9" />
+      <floor level="0" x="31" y="32" value="9" />
+      <floor level="0" x="32" y="32" value="9" />
+      <floor level="0" x="33" y="32" value="9" />
+      <floor level="0" x="30" y="33" value="9" />
+      <floor level="0" x="31" y="33" value="9" />
+      <floor level="0" x="32" y="33" value="9" />
+      <floor level="0" x="33" y="33" value="9" />
+    </floors>
+    <walls>
+    </walls>
+  </world>
+  <objects>
+    <object guid="0x6271EFF3" level="0" x="-2048" y="-2048" dir="0" group="0" />
+    <object guid="0x3184835C" level="0" x="-2048" y="-2048" dir="0" group="0" />
+  </objects>
+</house>
