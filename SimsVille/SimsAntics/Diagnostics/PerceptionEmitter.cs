@@ -63,6 +63,17 @@ namespace FSO.SimAntics.Diagnostics
             }
         }
 
+        /// <summary>
+        /// Builds the perception payload object for the given avatar.
+        /// Public static so that VMNetQuerySimStateCmd can reuse the same shape
+        /// without duplicating the field list (reeims-9e0).
+        /// Returns the same anonymous object that EmitPerceptions frames as JSON.
+        /// </summary>
+        public static object BuildPerceptionPayload(VM vm, VMAvatar avatar)
+        {
+            return BuildPerception(vm, avatar);
+        }
+
         private static object BuildPerception(VM vm, VMAvatar avatar)
         {
             // Nearby objects with their available interactions (pie menus)

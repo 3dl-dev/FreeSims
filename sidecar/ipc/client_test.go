@@ -878,6 +878,154 @@ func TestPathfindFailedInterleaved(t *testing.T) {
 	}
 }
 
+// TestQuerySimStateRoundTrip (reeims-9e0) simulates the query-sim-state → response path:
+//
+//  1. Client sends a QuerySimStateCmd with RequestID="qs1" and SimPersistID=28 over a real Unix socket.
+//  2. Fake-game reads the frame and verifies wire format:
+//     [type=38][uid LE][hasReq=1][len+"qs1"][sim_persist_id=28 LE]
+//  3. Fake-game sends back a full perception-shape response.
+//  4. We verify the client dispatches it to ResponseCh and the payload contains
+//     the required perception keys: motives, position, nearby_objects, lot_avatars, funds, clock.
+func TestQuerySimStateRoundTrip(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "qss.sock")
+
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		accepted <- conn
+	}()
+
+	client := NewClient(sockPath)
+	defer client.Close()
+
+	go func() {
+		_ = client.Connect()
+	}()
+
+	var gameConn net.Conn
+	select {
+	case gameConn = <-accepted:
+		defer gameConn.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for client connect")
+	}
+
+	const reqID = "qs1"
+	const simPersistID = uint32(28)
+	cmd := &QuerySimStateCmd{ActorUID: 0, RequestID: reqID, SimPersistID: simPersistID}
+	payload, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal("serialize:", err)
+	}
+	if err := client.SendFrame(payload); err != nil {
+		t.Fatal("send:", err)
+	}
+
+	// Read the frame on the game side and verify wire format.
+	gameConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var lenBuf [4]byte
+	if _, err := readFull(gameConn, lenBuf[:]); err != nil {
+		t.Fatal("read frame length:", err)
+	}
+	frameLen := binary.LittleEndian.Uint32(lenBuf[:])
+	frameBuf := make([]byte, frameLen)
+	if _, err := readFull(gameConn, frameBuf); err != nil {
+		t.Fatal("read frame payload:", err)
+	}
+
+	// Verify: [type=38][ActorUID=0 LE][hasReq=1][len(3)+"qs1"][sim_persist_id=28 LE]
+	if frameBuf[0] != byte(CmdQuerySimState) {
+		t.Fatalf("type byte = %d, want %d (CmdQuerySimState=38)", frameBuf[0], CmdQuerySimState)
+	}
+	actorUID := binary.LittleEndian.Uint32(frameBuf[1:5])
+	if actorUID != 0 {
+		t.Errorf("ActorUID = %d, want 0", actorUID)
+	}
+	if frameBuf[5] != 1 {
+		t.Errorf("hasRequestID = %d, want 1", frameBuf[5])
+	}
+	if frameBuf[6] != 3 {
+		t.Errorf("requestID length = %d, want 3", frameBuf[6])
+	}
+	if string(frameBuf[7:10]) != reqID {
+		t.Errorf("requestID = %q, want %q", string(frameBuf[7:10]), reqID)
+	}
+	gotPersistID := binary.LittleEndian.Uint32(frameBuf[10:14])
+	if gotPersistID != simPersistID {
+		t.Errorf("sim_persist_id = %d, want %d", gotPersistID, simPersistID)
+	}
+
+	// Simulate game sending a full perception-shape response.
+	// The payload IS the perception object (not wrapped in a sub-key).
+	perceptionPayload := `{` +
+		`"type":"perception",` +
+		`"persist_id":28,` +
+		`"sim_id":5,` +
+		`"name":"Daisy",` +
+		`"funds":5000,` +
+		`"clock":{"hours":10,"minutes":30,"seconds":0,"time_of_day":0,"day":2},` +
+		`"motives":{"hunger":50,"comfort":60,"energy":70,"hygiene":80,"bladder":90,"room":40,"social":30,"fun":20,"mood":55},` +
+		`"position":{"x":100,"y":200,"level":1},` +
+		`"rotation":0.0,` +
+		`"current_animation":"idle",` +
+		`"action_queue":[],` +
+		`"nearby_objects":[],` +
+		`"lot_avatars":[]` +
+		`}`
+	respJSON := `{"type":"response","request_id":"qs1","status":"ok","payload":` + perceptionPayload + `}`
+	respFrame := make([]byte, 4+len(respJSON))
+	binary.LittleEndian.PutUint32(respFrame[0:4], uint32(len(respJSON)))
+	copy(respFrame[4:], respJSON)
+	if _, err := gameConn.Write(respFrame); err != nil {
+		t.Fatal("write response frame:", err)
+	}
+
+	// Verify client delivers it to ResponseCh and the payload has perception shape.
+	select {
+	case rf := <-client.ResponseCh:
+		if rf.RequestID != reqID {
+			t.Errorf("ResponseFrame.RequestID = %q, want %q", rf.RequestID, reqID)
+		}
+		if rf.Status != "ok" {
+			t.Errorf("ResponseFrame.Status = %q, want ok", rf.Status)
+		}
+		if rf.Type != "response" {
+			t.Errorf("ResponseFrame.Type = %q, want response", rf.Type)
+		}
+		if rf.Payload == nil {
+			t.Fatal("ResponseFrame.Payload is nil")
+		}
+
+		// Parse payload as a map and verify required perception keys.
+		var payloadMap map[string]interface{}
+		if err := json.Unmarshal(rf.Payload, &payloadMap); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		for _, key := range []string{"motives", "position", "nearby_objects", "lot_avatars", "funds", "clock"} {
+			if _, exists := payloadMap[key]; !exists {
+				t.Errorf("perception payload missing required key %q", key)
+			}
+		}
+
+		// Verify funds value
+		if funds, ok := payloadMap["funds"].(float64); !ok || int(funds) != 5000 {
+			t.Errorf("funds = %v, want 5000", payloadMap["funds"])
+		}
+
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for query-sim-state response on ResponseCh")
+	}
+}
+
 func readFull(conn net.Conn, buf []byte) (int, error) {
 	total := 0
 	for total < len(buf) {

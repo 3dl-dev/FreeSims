@@ -326,6 +326,28 @@ namespace FSO.SimAntics.NetPlay.Drivers
             SendResponseFrameWithPayload(requestId, status, payloadJson);
         }
 
+        /// <summary>
+        /// Emits a response frame for a QuerySimState command (reeims-9e0).
+        /// On success, payloadJson is the full serialized perception object.
+        /// On error, errorKey is the short error string (e.g. "sim_not_found").
+        /// Format on success:
+        ///   {"type":"response","request_id":"...","status":"ok","payload":<perception-json>}
+        /// Format on error:
+        ///   {"type":"response","request_id":"...","status":"error","payload":{"error":"..."}}
+        /// </summary>
+        internal void SendQuerySimStateResponse(string requestId, string status, string errorKey, string perceptionJson)
+        {
+            string payloadJson;
+            if (status == "ok" && perceptionJson != null)
+                payloadJson = perceptionJson;
+            else
+            {
+                var escapedError = (errorKey ?? "unknown").Replace("\\", "\\\\").Replace("\"", "\\\"");
+                payloadJson = "{\"error\":\"" + escapedError + "\"}";
+            }
+            SendResponseFrameWithPayload(requestId, status, payloadJson);
+        }
+
         private void SendResponseFrameWithPayload(string requestId, string status, string payloadJson)
         {
             if (_client == null) return;

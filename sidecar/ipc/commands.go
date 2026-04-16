@@ -30,6 +30,7 @@ const (
 	CmdChangeLotSize     VMCommandType = 25
 	CmdQueryCatalog      VMCommandType = 36
 	CmdLoadLot           VMCommandType = 37
+	CmdQuerySimState     VMCommandType = 38
 )
 
 // ArchCommandType mirrors the C# VMArchitectureCommandType enum (byte).
@@ -468,5 +469,55 @@ func (c *LoadLotCmd) Serialize(buf *bytes.Buffer) error {
 
 	// HouseXml last.
 	writeBinaryString(buf, c.HouseXml)
+	return nil
+}
+
+// --- QuerySimState command (reeims-9e0) ---
+//
+// QuerySimStateCmd requests the full perception-shape state for a specific Sim
+// by PersistID. The game responds with the same JSON shape as a perception event
+// regardless of whether the Sim is idle or busy.
+//
+// Wire format (after VMCommandType byte):
+//
+//	[ActorUID: 4 bytes LE]
+//	[hasRequestID: 1 byte]            (0 or 1)
+//	[if 1: 7-bit-length-prefixed UTF-8 requestID]
+//	[sim_persist_id: uint32 LE]
+//
+// Layout per item spec:
+//
+//	[type=38][uid:4][flag=1][7bit-len+requestID][uint32 LE sim_persist_id]
+//
+// Response on success:
+//
+//	{"type":"response","request_id":"...","status":"ok","payload":{<full perception object>}}
+//
+// Response on error (e.g. Sim not found):
+//
+//	{"type":"response","request_id":"...","status":"error","payload":{"error":"sim_not_found"}}
+type QuerySimStateCmd struct {
+	ActorUID    uint32
+	RequestID   string // optional correlation ID
+	SimPersistID uint32
+}
+
+func (c *QuerySimStateCmd) CmdType() VMCommandType { return CmdQuerySimState }
+
+func (c *QuerySimStateCmd) Serialize(buf *bytes.Buffer) error {
+	writeActorUID(buf, c.ActorUID)
+
+	// RequestID BEFORE SimPersistID per the wire format spec.
+	if c.RequestID == "" {
+		buf.WriteByte(0)
+	} else {
+		buf.WriteByte(1)
+		writeBinaryString(buf, c.RequestID)
+	}
+
+	// sim_persist_id: uint32 LE
+	b := make([]byte, 4)
+	binary.LittleEndian.PutUint32(b, c.SimPersistID)
+	buf.Write(b)
 	return nil
 }

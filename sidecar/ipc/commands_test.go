@@ -606,6 +606,119 @@ func TestLoadLotCmdSerialize_WithRequestID(t *testing.T) {
 	}
 }
 
+// --- QuerySimStateCmd tests (reeims-9e0) ---
+
+func TestQuerySimStateCmdType_Is38(t *testing.T) {
+	cmd := &QuerySimStateCmd{}
+	if cmd.CmdType() != CmdQuerySimState {
+		t.Errorf("CmdType() = %d, want %d", cmd.CmdType(), CmdQuerySimState)
+	}
+	if byte(CmdQuerySimState) != 38 {
+		t.Errorf("CmdQuerySimState byte value = %d, want 38", byte(CmdQuerySimState))
+	}
+}
+
+func TestQuerySimStateCmdSerialize_NoRequestID(t *testing.T) {
+	cmd := &QuerySimStateCmd{ActorUID: 0, SimPersistID: 28}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Layout: [type=38][uid:4][hasReq=0][sim_persist_id:4]
+	// Total: 1 + 4 + 1 + 4 = 10
+	if data[0] != byte(CmdQuerySimState) {
+		t.Errorf("type byte = %d, want %d (CmdQuerySimState=38)", data[0], CmdQuerySimState)
+	}
+
+	uid := binary.LittleEndian.Uint32(data[1:5])
+	if uid != 0 {
+		t.Errorf("ActorUID = %d, want 0", uid)
+	}
+
+	if data[5] != 0 {
+		t.Errorf("hasRequestID = %d, want 0", data[5])
+	}
+
+	persistId := binary.LittleEndian.Uint32(data[6:10])
+	if persistId != 28 {
+		t.Errorf("SimPersistID = %d, want 28", persistId)
+	}
+
+	if len(data) != 10 {
+		t.Errorf("total length = %d, want 10", len(data))
+	}
+}
+
+func TestQuerySimStateCmdSerialize_WithRequestID(t *testing.T) {
+	cmd := &QuerySimStateCmd{ActorUID: 0, SimPersistID: 28, RequestID: "qs1"}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Layout: [type=38][uid:4][hasReq=1][7bit-len(3)+"qs1"][sim_persist_id:4]
+	// Total: 1 + 4 + 1 + 1 + 3 + 4 = 14
+	if data[0] != byte(CmdQuerySimState) {
+		t.Errorf("type byte = %d, want %d", data[0], CmdQuerySimState)
+	}
+
+	uid := binary.LittleEndian.Uint32(data[1:5])
+	if uid != 0 {
+		t.Errorf("ActorUID = %d, want 0", uid)
+	}
+
+	// hasRequestID at offset 5
+	if data[5] != 1 {
+		t.Errorf("hasRequestID = %d, want 1", data[5])
+	}
+
+	// requestID length at offset 6
+	if data[6] != 3 {
+		t.Errorf("requestID length = %d, want 3", data[6])
+	}
+	if string(data[7:10]) != "qs1" {
+		t.Errorf("requestID = %q, want %q", string(data[7:10]), "qs1")
+	}
+
+	// sim_persist_id at offset 10
+	persistId := binary.LittleEndian.Uint32(data[10:14])
+	if persistId != 28 {
+		t.Errorf("SimPersistID = %d, want 28", persistId)
+	}
+
+	if len(data) != 14 {
+		t.Errorf("total length = %d, want 14", len(data))
+	}
+}
+
+func TestQuerySimStateCmdSerialize_RequestIDBeforeSimPersistID(t *testing.T) {
+	// Regression: the wire format mandates RequestID before sim_persist_id:
+	// [type=38][uid:4][flag=1][7bit-len+requestID][uint32 LE sim_persist_id]
+	cmd := &QuerySimStateCmd{ActorUID: 0, SimPersistID: 1, RequestID: "r"}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Expected bytes:
+	//   data[0] = 38 (type)
+	//   data[1..4] = 0 (uid LE)
+	//   data[5]   = 1 (hasReq)
+	//   data[6]   = 1 (len("r"))
+	//   data[7]   = 'r'
+	//   data[8..11] = 1 LE (sim_persist_id)
+	if data[7] != 'r' {
+		t.Errorf("byte after requestID length should be 'r', got 0x%02x", data[7])
+	}
+	persistId := binary.LittleEndian.Uint32(data[8:12])
+	if persistId != 1 {
+		t.Errorf("SimPersistID = %d, want 1", persistId)
+	}
+	if len(data) != 12 {
+		t.Errorf("total length = %d, want 12", len(data))
+	}
+}
+
 func TestLoadLotCmdSerialize_RequestIDBeforeHouseXml(t *testing.T) {
 	// Regression test: the item spec is explicit that the layout is
 	// [type=37][uid:4][hasReq=1][7bit-len+requestID][7bit-len+house_xml]

@@ -43,6 +43,7 @@ namespace FSO.SimAntics.NetPlay.Model
             { VMCommandType.SetRoof, typeof(VMNetSetRoofCmd) },
             { VMCommandType.QueryCatalog, typeof(VMNetQueryCatalogCmd) },
             { VMCommandType.LoadLot, typeof(VMNetLoadLotCmd) },
+            { VMCommandType.QuerySimState, typeof(VMNetQuerySimStateCmd) },
 
         };
         public static Dictionary<Type, VMCommandType> ReverseMap = CmdMap.ToDictionary(x => x.Value, x => x.Key);
@@ -143,6 +144,14 @@ namespace FSO.SimAntics.NetPlay.Model
         /// UI thread via CoreGameScreen.RequestLotLoad. Emits a "queued" response
         /// frame immediately; does not block the VM tick thread.
         /// </summary>
-        LoadLot = 37
+        LoadLot = 37,
+
+        /// <summary>
+        /// Query a Sim's full perception-shape state on demand (reeims-9e0).
+        /// Agent sends sim_persist_id; game responds with the same JSON shape
+        /// that PerceptionEmitter emits — regardless of whether the Sim is idle.
+        /// Response payload: {"type":"perception",...} (full perception object).
+        /// </summary>
+        QuerySimState = 38
     }
 }
