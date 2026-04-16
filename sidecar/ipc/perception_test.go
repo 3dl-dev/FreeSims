@@ -4,12 +4,13 @@
  * http://mozilla.org/MPL/2.0/.
  */
 
-// Unit tests for the Perception struct (reeims-2ca, reeims-d43).
+// Unit tests for the Perception struct (reeims-2ca, reeims-d43, reeims-edc).
 //
 // These tests verify that the Funds field is correctly parsed from JSON
-// emitted by the game engine (reeims-2ca) and that the Clock struct is
-// correctly parsed (reeims-d43). day_of_week is absent from VMClock and
-// must not appear in the emitted JSON.
+// emitted by the game engine (reeims-2ca), that the Clock struct is
+// correctly parsed (reeims-d43), and that the Skills struct is correctly
+// parsed (reeims-edc). day_of_week is absent from VMClock and must not
+// appear in the emitted JSON.
 
 package ipc
 
@@ -40,7 +41,8 @@ const fullPerceptionJSON = `{
 			"current_animation": "idle",
 			"motives": {"hunger":-50,"comfort":30,"energy":60,"hygiene":20,"bladder":-10,"social":40,"fun":55,"mood":25}
 		}
-	]
+	],
+	"skills": {"cooking":500,"charisma":300,"mechanical":200,"creativity":750,"body":100,"logic":900}
 }`
 
 func TestPerception_FundsDeserialized(t *testing.T) {
@@ -334,6 +336,90 @@ func TestPathfindFailed_AllReasonCategories(t *testing.T) {
 				t.Errorf("expected reason=%q, got %q", reason, decoded.Reason)
 			}
 		})
+	}
+}
+
+// ── Skills tests (reeims-edc) ─────────────────────────────────────────────────
+
+func TestPerception_Skills_Deserialized(t *testing.T) {
+	var p Perception
+	if err := json.Unmarshal([]byte(fullPerceptionJSON), &p); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	if p.Skills.Cooking != 500 {
+		t.Errorf("expected Skills.Cooking=500, got %d", p.Skills.Cooking)
+	}
+	if p.Skills.Charisma != 300 {
+		t.Errorf("expected Skills.Charisma=300, got %d", p.Skills.Charisma)
+	}
+	if p.Skills.Mechanical != 200 {
+		t.Errorf("expected Skills.Mechanical=200, got %d", p.Skills.Mechanical)
+	}
+	if p.Skills.Creativity != 750 {
+		t.Errorf("expected Skills.Creativity=750, got %d", p.Skills.Creativity)
+	}
+	if p.Skills.Body != 100 {
+		t.Errorf("expected Skills.Body=100, got %d", p.Skills.Body)
+	}
+	if p.Skills.Logic != 900 {
+		t.Errorf("expected Skills.Logic=900, got %d", p.Skills.Logic)
+	}
+}
+
+func TestPerception_Skills_ZeroWhenAbsent(t *testing.T) {
+	raw := []byte(`{
+		"type": "perception",
+		"persist_id": 1,
+		"sim_id": 42,
+		"name": "Daisy",
+		"funds": 0,
+		"motives": {"hunger":0,"comfort":0,"energy":0,"hygiene":0,"bladder":0,"room":0,"social":0,"fun":0,"mood":0},
+		"position": {"x":0,"y":0,"level":1},
+		"rotation": 0.0,
+		"current_animation": "",
+		"action_queue": [],
+		"nearby_objects": []
+	}`)
+
+	var p Perception
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	if p.Skills != (Skills{}) {
+		t.Errorf("expected all Skills zero when field absent, got %+v", p.Skills)
+	}
+}
+
+func TestPerception_Skills_RoundTrip(t *testing.T) {
+	original := Perception{
+		Type:      "perception",
+		PersistID: 1,
+		SimID:     42,
+		Name:      "Daisy",
+		Skills: Skills{
+			Cooking:    1000,
+			Charisma:   800,
+			Mechanical: 600,
+			Creativity: 400,
+			Body:       200,
+			Logic:      1000,
+		},
+	}
+
+	encoded, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	var decoded Perception
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	if decoded.Skills != original.Skills {
+		t.Errorf("round-trip skills: expected %+v, got %+v", original.Skills, decoded.Skills)
 	}
 }
 

@@ -169,6 +169,15 @@ namespace FSO.SimAntics.Diagnostics
                 }).ToList(),
                 nearby_objects = nearbyObjects,
                 lot_avatars = lotAvatars,
+                skills = new
+                {
+                    cooking    = avatar.GetPersonData(VMPersonDataVariable.CookingSkill),
+                    charisma   = avatar.GetPersonData(VMPersonDataVariable.CharismaSkill),
+                    mechanical = avatar.GetPersonData(VMPersonDataVariable.MechanicalSkill),
+                    creativity = avatar.GetPersonData(VMPersonDataVariable.CreativitySkill),
+                    body       = avatar.GetPersonData(VMPersonDataVariable.BodySkill),
+                    logic      = avatar.GetPersonData(VMPersonDataVariable.LogicSkill),
+                },
             };
         }
     }

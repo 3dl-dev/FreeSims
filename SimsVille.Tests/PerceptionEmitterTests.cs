@@ -4,7 +4,7 @@
  * http://mozilla.org/MPL/2.0/.
  */
 
-// Unit tests for the perception JSON shape (reeims-2ca, reeims-d43).
+// Unit tests for the perception JSON shape (reeims-2ca, reeims-d43, reeims-edc).
 //
 // Done condition (2ca): perception event JSON includes a "funds" (int32) field.
 // Done condition (d43): perception event JSON includes a "clock" object with
@@ -85,7 +85,15 @@ namespace SimsVille.Tests
                             "mood": 25
                         }
                     }
-                ]
+                ],
+                "skills": {
+                    "cooking": 500,
+                    "charisma": 300,
+                    "mechanical": 200,
+                    "creativity": 750,
+                    "body": 100,
+                    "logic": 900
+                }
             }
             """;
 
@@ -289,7 +297,95 @@ namespace SimsVille.Tests
             Assert.Equal(25,  motives.GetProperty("mood").GetInt32());
         }
 
-        // Minimal DTO mirroring the perception JSON shape (funds + clock + lot_avatars fields).
+        // ── Skills tests (reeims-edc) ──────────────────────────────────────────
+
+        [Fact]
+        public void PerceptionJson_ContainsSkillsField()
+        {
+            using var doc = JsonDocument.Parse(SamplePerceptionJson);
+            Assert.True(doc.RootElement.TryGetProperty("skills", out var elem),
+                "perception JSON must contain a 'skills' property");
+            Assert.Equal(JsonValueKind.Object, elem.ValueKind);
+        }
+
+        [Fact]
+        public void PerceptionJson_SkillsShape_HasAllSixFields()
+        {
+            using var doc = JsonDocument.Parse(SamplePerceptionJson);
+            var skills = doc.RootElement.GetProperty("skills");
+
+            foreach (var field in new[] { "cooking", "charisma", "mechanical", "creativity", "body", "logic" })
+            {
+                Assert.True(skills.TryGetProperty(field, out _),
+                    $"skills must have '{field}' field");
+            }
+        }
+
+        [Fact]
+        public void PerceptionJson_SkillsValues_AreCorrect()
+        {
+            using var doc = JsonDocument.Parse(SamplePerceptionJson);
+            var skills = doc.RootElement.GetProperty("skills");
+
+            Assert.Equal(500, skills.GetProperty("cooking").GetInt32());
+            Assert.Equal(300, skills.GetProperty("charisma").GetInt32());
+            Assert.Equal(200, skills.GetProperty("mechanical").GetInt32());
+            Assert.Equal(750, skills.GetProperty("creativity").GetInt32());
+            Assert.Equal(100, skills.GetProperty("body").GetInt32());
+            Assert.Equal(900, skills.GetProperty("logic").GetInt32());
+        }
+
+        [Fact]
+        public void PerceptionJson_SkillsFields_AreIntegers()
+        {
+            using var doc = JsonDocument.Parse(SamplePerceptionJson);
+            var skills = doc.RootElement.GetProperty("skills");
+
+            foreach (var field in new[] { "cooking", "charisma", "mechanical", "creativity", "body", "logic" })
+            {
+                Assert.True(skills.GetProperty(field).ValueKind == JsonValueKind.Number,
+                    $"skills.{field} must be a number");
+            }
+        }
+
+        [Fact]
+        public void PerceptionJson_Skills_RoundTrip_PreservesValues()
+        {
+            var dto = JsonSerializer.Deserialize<PerceptionDto>(SamplePerceptionJson,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            Assert.NotNull(dto);
+            Assert.NotNull(dto.Skills);
+
+            Assert.Equal(500, dto.Skills.Cooking);
+            Assert.Equal(300, dto.Skills.Charisma);
+            Assert.Equal(200, dto.Skills.Mechanical);
+            Assert.Equal(750, dto.Skills.Creativity);
+            Assert.Equal(100, dto.Skills.Body);
+            Assert.Equal(900, dto.Skills.Logic);
+
+            var reEncoded = JsonSerializer.Serialize(dto);
+            var dto2 = JsonSerializer.Deserialize<PerceptionDto>(reEncoded,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            Assert.NotNull(dto2.Skills);
+            Assert.Equal(dto.Skills.Cooking,    dto2.Skills.Cooking);
+            Assert.Equal(dto.Skills.Charisma,   dto2.Skills.Charisma);
+            Assert.Equal(dto.Skills.Mechanical, dto2.Skills.Mechanical);
+            Assert.Equal(dto.Skills.Creativity, dto2.Skills.Creativity);
+            Assert.Equal(dto.Skills.Body,       dto2.Skills.Body);
+            Assert.Equal(dto.Skills.Logic,      dto2.Skills.Logic);
+        }
+
+        [Fact]
+        public void PerceptionJson_SkillsRange_MaxValueFitsInt16()
+        {
+            // TS1 skills are stored as short (PersonData is short[100]).
+            // Max skill value is 1000 — well within int16 max (32767).
+            const short maxSkill = 1000;
+            Assert.True(maxSkill <= short.MaxValue,
+                "max skill value 1000 must fit in int16 (PersonData is short[])");
+        }
+
+        // Minimal DTO mirroring the perception JSON shape (funds + clock + lot_avatars + skills fields).
         // Uses JsonPropertyName to match the snake_case keys emitted by PerceptionEmitter.
         private sealed class PerceptionDto
         {
@@ -307,6 +403,9 @@ namespace SimsVille.Tests
 
             [System.Text.Json.Serialization.JsonPropertyName("lot_avatars")]
             public List<LotAvatarDto> LotAvatars { get; set; } = new();
+
+            [System.Text.Json.Serialization.JsonPropertyName("skills")]
+            public SkillsDto Skills { get; set; }
         }
 
         private sealed class ClockDto
@@ -334,6 +433,27 @@ namespace SimsVille.Tests
 
             [System.Text.Json.Serialization.JsonPropertyName("name")]
             public string Name { get; set; }
+        }
+
+        private sealed class SkillsDto
+        {
+            [System.Text.Json.Serialization.JsonPropertyName("cooking")]
+            public int Cooking { get; set; }
+
+            [System.Text.Json.Serialization.JsonPropertyName("charisma")]
+            public int Charisma { get; set; }
+
+            [System.Text.Json.Serialization.JsonPropertyName("mechanical")]
+            public int Mechanical { get; set; }
+
+            [System.Text.Json.Serialization.JsonPropertyName("creativity")]
+            public int Creativity { get; set; }
+
+            [System.Text.Json.Serialization.JsonPropertyName("body")]
+            public int Body { get; set; }
+
+            [System.Text.Json.Serialization.JsonPropertyName("logic")]
+            public int Logic { get; set; }
         }
     }
 }
