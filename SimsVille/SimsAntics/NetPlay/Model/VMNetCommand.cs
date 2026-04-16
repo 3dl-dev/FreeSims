@@ -48,6 +48,8 @@ namespace FSO.SimAntics.NetPlay.Model
             { VMCommandType.QueryWallAt, typeof(VMNetQueryWallAtCmd) },
             { VMCommandType.QueryFloorAt, typeof(VMNetQueryFloorAtCmd) },
             { VMCommandType.QueryTilePathable, typeof(VMNetQueryTilePathableCmd) },
+            { VMCommandType.SaveSim, typeof(VMNetSaveSimCmd) },
+            { VMCommandType.LoadSim, typeof(VMNetLoadSimCmd) },
 
         };
         public static Dictionary<Type, VMCommandType> ReverseMap = CmdMap.ToDictionary(x => x.Value, x => x.Key);
@@ -184,6 +186,22 @@ namespace FSO.SimAntics.NetPlay.Model
         /// Best-effort static check: bounds, solid walls, entity footprints.
         /// Response payload: {"pathable":bool,"reason":"clear"|"wall"|"blocked_by_object"|"out_of_bounds"}
         /// </summary>
-        QueryTilePathable = 42
+        QueryTilePathable = 42,
+
+        /// <summary>
+        /// Save a Sim's full marshalled state to a file under Content/Saves/ (reeims-eb9).
+        /// Agent sends ActorUID (PersistID of the target Sim) + filename; game writes
+        /// a VMAvatarMarshal binary blob and responds with
+        /// {status:"ok",filename:"<path>",bytes_written:N} on success.
+        /// </summary>
+        SaveSim = 43,
+
+        /// <summary>
+        /// Load a saved Sim snapshot from Content/Saves/ and spawn it on the current
+        /// lot (reeims-eb9). Agent sends filename + spawn_at coords; game deserializes
+        /// the marshal, creates a new avatar, and places it. Responds with
+        /// {status:"ok",new_persist_id:N,position:{x,y,level}} on success.
+        /// </summary>
+        LoadSim = 44
     }
 }

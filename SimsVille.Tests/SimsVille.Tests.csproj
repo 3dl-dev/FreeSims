@@ -12,6 +12,13 @@
     <NoWarn>$(NoWarn);CS0108;CS0114;CS0162;CS0168;CS0169;CS0219;CS0414;CS0618;CS0649;CS1591;CS8632;SYSLIB0011</NoWarn>
   </PropertyGroup>
 
+  <!-- Include the real SimSaveStore source file for real-integration tests of
+       path safety rules (reeims-eb9). The file is pure (no MonoGame deps) so
+       it compiles cleanly into the test assembly. -->
+  <ItemGroup>
+    <Compile Include="..\SimsVille\SimsAntics\Diagnostics\SimSaveStore.cs" LinkBase="IncludedFromSimsVille" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.6.0" />
     <PackageReference Include="xunit" Version="2.4.2" />

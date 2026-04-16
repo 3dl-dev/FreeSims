@@ -1298,3 +1298,175 @@ func TestQueryTilePathableCmdSerialize_RequestIDBeforeCoords(t *testing.T) {
 		t.Errorf("Y at offset 12 = %d, want 5", int16(binary.LittleEndian.Uint16(data[12:14])))
 	}
 }
+
+// --- SaveSim / LoadSim command tests (reeims-eb9) ---
+
+// SaveSimCmd wire format: [type=43][uid:4][hasReq:1][optional reqID][7bit-len+filename]
+
+func TestSaveSimCmdType_Is43(t *testing.T) {
+	cmd := &SaveSimCmd{}
+	if cmd.CmdType() != CmdSaveSim {
+		t.Errorf("CmdType() = %d, want %d (CmdSaveSim)", cmd.CmdType(), CmdSaveSim)
+	}
+	if byte(CmdSaveSim) != 43 {
+		t.Errorf("CmdSaveSim byte value = %d, want 43", byte(CmdSaveSim))
+	}
+}
+
+func TestSaveSimCmdSerialize_NoRequestID(t *testing.T) {
+	cmd := &SaveSimCmd{ActorUID: 77, Filename: "daisy.sav"}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Layout: [type=43][uid:4][hasReq=0][7bit-len(9)+"daisy.sav"]
+	// Total: 1 + 4 + 1 + 1 + 9 = 16
+	if len(data) != 16 {
+		t.Fatalf("total bytes = %d, want 16", len(data))
+	}
+	if data[0] != byte(CmdSaveSim) {
+		t.Errorf("type byte = %d, want 43", data[0])
+	}
+	if binary.LittleEndian.Uint32(data[1:5]) != 77 {
+		t.Errorf("ActorUID = %d, want 77", binary.LittleEndian.Uint32(data[1:5]))
+	}
+	if data[5] != 0x00 {
+		t.Errorf("hasRequestID = 0x%02x, want 0x00", data[5])
+	}
+	if data[6] != 0x09 {
+		t.Errorf("filename len = 0x%02x, want 0x09", data[6])
+	}
+	if string(data[7:16]) != "daisy.sav" {
+		t.Errorf("filename = %q, want daisy.sav", string(data[7:16]))
+	}
+}
+
+func TestSaveSimCmdSerialize_WithRequestID(t *testing.T) {
+	cmd := &SaveSimCmd{ActorUID: 77, RequestID: "ss1", Filename: "daisy.sav"}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Layout: [type=43][uid:4][hasReq=1][len(3)+"ss1"][len(9)+"daisy.sav"]
+	// Total: 1 + 4 + 1 + 1 + 3 + 1 + 9 = 20
+	if len(data) != 20 {
+		t.Fatalf("total bytes = %d, want 20", len(data))
+	}
+	if data[5] != 0x01 {
+		t.Errorf("hasRequestID = 0x%02x, want 0x01", data[5])
+	}
+	if data[6] != 0x03 {
+		t.Errorf("requestID len = 0x%02x, want 0x03", data[6])
+	}
+	if string(data[7:10]) != "ss1" {
+		t.Errorf("requestID = %q, want ss1", string(data[7:10]))
+	}
+	// After requestID: [len=9]["daisy.sav"] at offsets 10..19
+	if data[10] != 0x09 {
+		t.Errorf("filename len = 0x%02x, want 0x09", data[10])
+	}
+	if string(data[11:20]) != "daisy.sav" {
+		t.Errorf("filename = %q, want daisy.sav", string(data[11:20]))
+	}
+}
+
+// LoadSimCmd wire format:
+//   [type=44][uid:4][hasReq:1][optional reqID][7bit-len+filename][x:2][y:2][level:1]
+
+func TestLoadSimCmdType_Is44(t *testing.T) {
+	cmd := &LoadSimCmd{}
+	if cmd.CmdType() != CmdLoadSim {
+		t.Errorf("CmdType() = %d, want %d (CmdLoadSim)", cmd.CmdType(), CmdLoadSim)
+	}
+	if byte(CmdLoadSim) != 44 {
+		t.Errorf("CmdLoadSim byte value = %d, want 44", byte(CmdLoadSim))
+	}
+}
+
+func TestLoadSimCmdSerialize_NoRequestID(t *testing.T) {
+	cmd := &LoadSimCmd{ActorUID: 0, Filename: "daisy.sav", X: 8, Y: 12, Level: 1}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Layout: [type=44][uid:4][hasReq=0][len(9)+"daisy.sav"][x:2][y:2][level:1]
+	// Total: 1 + 4 + 1 + 1 + 9 + 2 + 2 + 1 = 21
+	if len(data) != 21 {
+		t.Fatalf("total bytes = %d, want 21", len(data))
+	}
+	if data[0] != byte(CmdLoadSim) {
+		t.Errorf("type byte = %d, want 44", data[0])
+	}
+	if binary.LittleEndian.Uint32(data[1:5]) != 0 {
+		t.Errorf("ActorUID = %d, want 0 (load-sim ignores)", binary.LittleEndian.Uint32(data[1:5]))
+	}
+	if data[5] != 0x00 {
+		t.Errorf("hasRequestID = 0x%02x, want 0x00", data[5])
+	}
+	if data[6] != 0x09 {
+		t.Errorf("filename len = 0x%02x, want 0x09", data[6])
+	}
+	if string(data[7:16]) != "daisy.sav" {
+		t.Errorf("filename = %q, want daisy.sav", string(data[7:16]))
+	}
+	if int16(binary.LittleEndian.Uint16(data[16:18])) != 8 {
+		t.Errorf("X = %d, want 8", int16(binary.LittleEndian.Uint16(data[16:18])))
+	}
+	if int16(binary.LittleEndian.Uint16(data[18:20])) != 12 {
+		t.Errorf("Y = %d, want 12", int16(binary.LittleEndian.Uint16(data[18:20])))
+	}
+	if data[20] != 1 {
+		t.Errorf("level = %d, want 1", data[20])
+	}
+}
+
+func TestLoadSimCmdSerialize_WithRequestID(t *testing.T) {
+	cmd := &LoadSimCmd{RequestID: "ls1", Filename: "d.sav", X: 3, Y: 5, Level: 2}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Layout: [type=44][uid:4][hasReq=1][len(3)+"ls1"][len(5)+"d.sav"][x:2][y:2][level:1]
+	// Total: 1 + 4 + 1 + 1 + 3 + 1 + 5 + 2 + 2 + 1 = 21
+	if len(data) != 21 {
+		t.Fatalf("total bytes = %d, want 21", len(data))
+	}
+	if data[5] != 0x01 {
+		t.Errorf("hasRequestID = 0x%02x, want 0x01", data[5])
+	}
+	if string(data[7:10]) != "ls1" {
+		t.Errorf("requestID = %q, want ls1 (must precede filename)", string(data[7:10]))
+	}
+	// filename at offset 10..15: [len=5]["d.sav"]
+	if data[10] != 0x05 {
+		t.Errorf("filename len = 0x%02x, want 0x05", data[10])
+	}
+	if string(data[11:16]) != "d.sav" {
+		t.Errorf("filename = %q, want d.sav", string(data[11:16]))
+	}
+	// coords after filename
+	if int16(binary.LittleEndian.Uint16(data[16:18])) != 3 {
+		t.Errorf("X = %d, want 3", int16(binary.LittleEndian.Uint16(data[16:18])))
+	}
+	if int16(binary.LittleEndian.Uint16(data[18:20])) != 5 {
+		t.Errorf("Y = %d, want 5", int16(binary.LittleEndian.Uint16(data[18:20])))
+	}
+	if data[20] != 2 {
+		t.Errorf("level = %d, want 2", data[20])
+	}
+}
+
+func TestLoadSimCmdSerialize_NegativeCoords(t *testing.T) {
+	cmd := &LoadSimCmd{Filename: "x.sav", X: -4, Y: -8, Level: 1}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Find coord offsets: 1 + 4 + 1 + (1 + 5) = 12 → x at 12..13, y at 14..15, level at 16
+	if int16(binary.LittleEndian.Uint16(data[12:14])) != -4 {
+		t.Errorf("X = %d, want -4", int16(binary.LittleEndian.Uint16(data[12:14])))
+	}
+	if int16(binary.LittleEndian.Uint16(data[14:16])) != -8 {
+		t.Errorf("Y = %d, want -8", int16(binary.LittleEndian.Uint16(data[14:16])))
+	}
+}

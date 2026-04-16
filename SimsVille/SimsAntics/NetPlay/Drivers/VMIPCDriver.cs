@@ -412,6 +412,48 @@ namespace FSO.SimAntics.NetPlay.Drivers
             SendResponseFrameWithPayload(requestId, "ok", payloadJson);
         }
 
+        /// <summary>
+        /// Emits a response frame for a SaveSim command (reeims-eb9).
+        /// On success: {"status":"ok","filename":"<path>","bytes_written":N}
+        /// On error:   {"status":"error","error":"<errorKey>"}
+        /// </summary>
+        internal void SendSaveSimResponse(string requestId, string status, string errorKey, string filename, int bytesWritten)
+        {
+            string payloadJson;
+            if (status == "ok")
+            {
+                var escapedFilename = (filename ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
+                payloadJson = "{\"status\":\"ok\",\"filename\":\"" + escapedFilename + "\",\"bytes_written\":" + bytesWritten + "}";
+            }
+            else
+            {
+                var escapedError = (errorKey ?? "unknown").Replace("\\", "\\\\").Replace("\"", "\\\"");
+                payloadJson = "{\"status\":\"error\",\"error\":\"" + escapedError + "\"}";
+            }
+            SendResponseFrameWithPayload(requestId, status, payloadJson);
+        }
+
+        /// <summary>
+        /// Emits a response frame for a LoadSim command (reeims-eb9).
+        /// On success: {"status":"ok","new_persist_id":N,"position":{"x":X,"y":Y,"level":L}}
+        /// On error:   {"status":"error","error":"<errorKey>"}
+        /// </summary>
+        internal void SendLoadSimResponse(string requestId, string status, string errorKey, uint newPersistId, short x, short y, byte level)
+        {
+            string payloadJson;
+            if (status == "ok")
+            {
+                payloadJson = "{\"status\":\"ok\",\"new_persist_id\":" + newPersistId
+                    + ",\"position\":{\"x\":" + x + ",\"y\":" + y + ",\"level\":" + level + "}}";
+            }
+            else
+            {
+                var escapedError = (errorKey ?? "unknown").Replace("\\", "\\\\").Replace("\"", "\\\"");
+                payloadJson = "{\"status\":\"error\",\"error\":\"" + escapedError + "\"}";
+            }
+            SendResponseFrameWithPayload(requestId, status, payloadJson);
+        }
+
         private void SendResponseFrameWithPayload(string requestId, string status, string payloadJson)
         {
             if (_client == null) return;
