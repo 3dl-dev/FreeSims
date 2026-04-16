@@ -151,6 +151,61 @@ def _send(cmd: dict, actor_uid: int, log_path: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Landmark table — reusable by walk_to and interact (reeims-3f8)
+# ---------------------------------------------------------------------------
+
+# ≤10 canonical category hints: maps landmark name → list of substrings to match in object name
+# Order within each list is priority (first match wins).
+LANDMARK_CATEGORIES: dict[str, list[str]] = {
+    "kitchen":     ["refrigerator", "fridge", "stove", "oven", "counter"],
+    "bathroom":    ["toilet", "shower", "bath", "sink"],
+    "bedroom":     ["bed"],
+    "living_room": ["sofa", "couch", "television", "tv"],
+    "front_door":  ["door"],
+    "stereo":      ["stereo", "speaker", "boombox", "radio"],
+    "phone":       ["phone", "telephone"],
+    "computer":    ["computer", "pc", "laptop"],
+    "bookshelf":   ["bookshelf", "bookcase", "shelf"],
+    "fireplace":   ["fireplace", "hearth"],
+}
+
+
+@dataclass
+class ObjRef:
+    """Resolved object reference — landmark table entry or Sim position."""
+    object_id: int; x: int; y: int; level: int; name: str
+
+
+def build_landmark_table(nearby_objects: list[dict]) -> dict[str, ObjRef]:
+    """Map canonical landmark names → nearest matching ObjRef from nearby_objects.
+    Rebuilt each perception so the table stays fresh. Reused by interact handler.
+    """
+    table: dict[str, ObjRef] = {}
+    for landmark, hints in LANDMARK_CATEGORIES.items():
+        best: ObjRef | None = None
+        best_dist: float = float("inf")
+        for obj in nearby_objects:
+            obj_name = (obj.get("name") or "").lower()
+            matched = any(h in obj_name for h in hints)
+            if not matched:
+                continue
+            pos = obj.get("position") or {}
+            dist = float(obj.get("distance", 0))
+            if best is None or dist < best_dist:
+                best_dist = dist
+                best = ObjRef(
+                    object_id=obj.get("object_id", 0),
+                    x=pos.get("x", 0),
+                    y=pos.get("y", 0),
+                    level=pos.get("level", 1),
+                    name=obj.get("name", landmark),
+                )
+        if best is not None:
+            table[landmark] = best
+    return table
+
+
+# ---------------------------------------------------------------------------
 # Tool handlers — 4 wired, 2 stubs
 # ---------------------------------------------------------------------------
 class ToolHandlers:
@@ -214,10 +269,48 @@ class ToolHandlers:
         result = "; ".join(parts) if parts else "quiet house, nothing remarkable"
         return result
 
-    # --- STUB: walk_to (reeims-039 will implement) ---
+    # --- WIRED: walk_to ---
+    def resolve_walk_target(self, target: str, perception: dict) -> "ObjRef | None":
+        """3-tier: (a) Sim name in lot_avatars, (b) landmark table, (c) None."""
+        tl = target.lower()
+        for av in (perception.get("lot_avatars") or []):
+            if (av.get("name") or "").lower() == tl:
+                pos = av.get("position") or {}
+                return ObjRef(av.get("persist_id", 0), pos.get("x", 0), pos.get("y", 0),
+                              pos.get("level", 1), av.get("name", target))
+        return build_landmark_table(perception.get("nearby_objects") or []).get(tl)
+
     def handle_walk_to(self, args: dict) -> str:
+        """Resolve target, emit goto IPC, set walk_event for async await."""
         target = str(args.get("target", "")).strip()
-        return f"arrived at {target}"
+        if not target:
+            return "error: target required"
+        agent = self.agent
+        dest = self.resolve_walk_target(target, agent.last_perception or {})
+        if dest is None:
+            p = agent.last_perception or {}
+            known = sorted(set(LANDMARK_CATEGORIES.keys()) | {
+                a.get("name", "") for a in (p.get("lot_avatars") or [])} - {""})
+            return f"error: unknown target '{target}'. Known: {', '.join(known)}"
+        agent.walk_target = dest
+        agent.walk_start_tick = agent.tick
+        agent.walk_result = None
+        agent.walk_event = asyncio.Event()
+        _send({"type": "goto", "x": dest.x, "y": dest.y, "level": dest.level},
+              agent.actor_uid, agent.log_path)
+        return f"_walk_pending:{target}"
+
+    async def handle_walk_to_async(self, args: dict) -> str:
+        """Emit goto and await arrival/failure/timeout (30 ticks)."""
+        sync = self.handle_walk_to(args)
+        if not sync.startswith("_walk_pending:"):
+            return sync
+        target = args.get("target", "")
+        try:
+            await asyncio.wait_for(self.agent.walk_event.wait(), timeout=30)
+        except asyncio.TimeoutError:
+            self.agent.walk_result = f"timed out walking to {target}"
+        return self.agent.walk_result or f"arrived at {target}"
 
     # --- STUB: interact (reeims-3f8 will implement) ---
     def handle_interact(self, args: dict) -> str:
@@ -292,7 +385,7 @@ def _build_sdk_tools(handlers: ToolHandlers) -> list:
         input_schema={"type": "object", "properties": {"target": {"type": "string"}}, "required": ["target"]},
     )
     async def walk_to(args: dict) -> dict:
-        result = handlers.handle_walk_to(args)
+        result = await handlers.handle_walk_to_async(args)
         return {"content": [{"type": "text", "text": result}]}
 
     @tool(
@@ -328,25 +421,22 @@ class SimAgentV3:
         self.intent: IntentState = IntentState()
         self.log_path: str = f"/tmp/embodied-agent-{PERSIST_ID_ENV or 'unknown'}.jsonl"
         self.handlers = ToolHandlers(self)
+        self.walk_target: ObjRef | None = None   # walk-await state (reeims-039)
+        self.walk_start_tick: int = 0
+        self.walk_result: str | None = None
+        self.walk_event: asyncio.Event = asyncio.Event()
 
     @property
     def wait_until_tick(self) -> int:
-        """[ATTENTION SEAM] reeims-2d6 — proxy to intent.wait_until_tick."""
-        return self.intent.wait_until_tick
+        return self.intent.wait_until_tick  # [ATTENTION SEAM] reeims-2d6
 
     @wait_until_tick.setter
     def wait_until_tick(self, value: int) -> None:
         self.intent.wait_until_tick = value
 
     def _build_perception_message(self, perception: dict) -> str:
-        """Format a perception as the user message to Claude."""
-        memories_block = ""
-        if self.memories:
-            memories_block = "\n<memories>\n" + "\n".join(f"- {m}" for m in self.memories) + "\n</memories>"
-        return (
-            f"<perception>{json.dumps(perception)}</perception>"
-            f"{memories_block}"
-        )
+        mb = ("\n<memories>\n" + "\n".join(f"- {m}" for m in self.memories) + "\n</memories>") if self.memories else ""
+        return f"<perception>{json.dumps(perception)}</perception>{mb}"
 
     async def _call_llm(self, perception: dict) -> None:
         """Invoke Claude Agent SDK for one perception tick."""
@@ -384,16 +474,8 @@ class SimAgentV3:
                         if btype == "ToolUseBlock":
                             result = self.handlers.dispatch(block.name, block.input)
                             tool_uses.append({"tool": block.name, "input": block.input, "result": result})
-                            _log(
-                                self.log_path,
-                                {
-                                    "event": "turn",
-                                    "tick": self.tick,
-                                    "tool": block.name,
-                                    "args": block.input,
-                                    "result": result,
-                                },
-                            )
+                            _log(self.log_path, {"event": "turn", "tick": self.tick,
+                                                 "tool": block.name, "args": block.input, "result": result})
                         elif btype == "TextBlock":
                             text_outputs.append(block.text)
                             _log(self.log_path, {"event": "text", "tick": self.tick, "text": block.text})
@@ -415,18 +497,14 @@ class SimAgentV3:
             self.log_path = f"/tmp/embodied-agent-{self.actor_uid}.jsonl"
             _err(f"locked onto: {self.name} (persist_id={self.actor_uid})")
         self.last_perception = data
-        _log(
-            self.log_path,
-            {"event": "perception", "tick": self.tick, "clock": data.get("clock"), "motives": data.get("motives")},
-        )
+        _log(self.log_path, {"event": "perception", "tick": self.tick,
+                             "clock": data.get("clock"), "motives": data.get("motives")})
 
-        # [ATTENTION SEAM] — gate LLM calls via should_think()
-        wake, reason = should_think(data, self.intent, self.tick)
+        self._check_walk_arrival(data)  # [WALK SEAM] signal arrival/failure/timeout
+        wake, reason = should_think(data, self.intent, self.tick)  # [ATTENTION SEAM]
         if not wake:
             _log(self.log_path, {"event": "attention_skip", "tick": self.tick, "reason": reason})
             return
-
-        # Update intent state snapshots before LLM call
         self.intent.last_llm_tick = self.tick
         self.intent.last_motives = dict(_motive_keys(data))
         self.intent.last_lot_avatars = _avatar_names(data)
@@ -437,12 +515,35 @@ class SimAgentV3:
         _log(self.log_path, {"event": "attention_wake", "tick": self.tick, "trigger": reason})
         asyncio.run(self._call_llm(data))
 
+    def _resolve_walk(self, result: str) -> None:
+        """Complete the pending walk with result string and signal the event."""
+        self.walk_result = result
+        self.walk_target = None
+        self.walk_event.set()
+
+    def _check_walk_arrival(self, perception: dict) -> None:
+        """Signal walk_event on arrival, pathfind-failed, or 30-tick timeout."""
+        if self.walk_target is None or self.walk_event.is_set():
+            return
+        if (self.tick - self.walk_start_tick) >= 30:
+            self._resolve_walk(f"timed out walking to {self.walk_target.name}"); return
+        for ev in (perception.get("recent_events") or []):
+            if isinstance(ev, dict) and ev.get("type") == "pathfind-failed":
+                self._resolve_walk(f"blocked: {ev.get('reason') or 'path blocked'}"); return
+        pos = perception.get("position") or {}
+        dx, dy = pos.get("x", 0) - self.walk_target.x, pos.get("y", 0) - self.walk_target.y
+        if dx * dx + dy * dy <= 4:
+            self._resolve_walk(f"arrived at {self.walk_target.name}")
+
     def on_response(self, data: dict) -> None: _log(self.log_path, {"event": "ipc_in", "frame": data})
     def on_dialog(self, data: dict) -> None: _log(self.log_path, {"event": "ipc_in", "frame": data})
 
     def on_pathfind_failed(self, data: dict) -> None:
         _log(self.log_path, {"event": "ipc_in", "frame": data})
-        _err(f"pathfind-failed: {data.get('reason')}")
+        reason = data.get("reason") or "path blocked"
+        _err(f"pathfind-failed: {reason}")
+        if self.walk_target is not None and not self.walk_event.is_set():
+            self._resolve_walk(f"blocked: {reason}")
 
 
 # ---------------------------------------------------------------------------

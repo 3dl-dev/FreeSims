@@ -5,6 +5,7 @@ Tests tool handlers directly — no LLM boundary crossed.
 Mocks are OK here; we're validating IPC shape, not SDK integration.
 """
 
+import asyncio
 import importlib.util
 import io
 import json
@@ -72,13 +73,17 @@ def agent():
     a.last_perception = {
         "clock": {"hours": 9, "minutes": 30},
         "motives": {"hunger": 45, "energy": 70, "mood": 60},
-        "nearby_objects": [{"name": "Refrigerator", "object_id": 101}],
-        "lot_avatars": [{"name": "Gerry", "persist_id": 99}],
+        "nearby_objects": [{"name": "Refrigerator", "object_id": 101, "position": {"x": 3, "y": 5, "level": 1}, "distance": 4.0}],
+        "lot_avatars": [{"name": "Gerry", "persist_id": 99, "position": {"x": 6, "y": 8, "level": 1}}],
     }
     a.memories = []
     a.intent = IntentState()
     a.wait_until_tick = 0
     a.log_path = "/tmp/test-agent-42.jsonl"
+    a.walk_target = None
+    a.walk_start_tick = 0
+    a.walk_result = None
+    a.walk_event = asyncio.Event()
     a.handlers = ToolHandlers(a)
     return a
 
@@ -181,19 +186,29 @@ class TestLookAroundTool:
 
 
 # ---------------------------------------------------------------------------
-# walk_to stub — returns placeholder
+# walk_to — real implementation (reeims-039)
 # ---------------------------------------------------------------------------
 
 class TestWalkToStub:
-    def test_walk_to_returns_arrived(self, agent, capsys):
+    def test_walk_to_emits_goto_ipc(self, agent, capsys):
+        """walk_to a resolvable landmark emits a goto IPC frame."""
+        # fixture has Refrigerator in nearby_objects → resolves to "kitchen"
         result = agent.handlers.handle_walk_to({"target": "kitchen"})
-        assert result == "arrived at kitchen"
         captured = capsys.readouterr()
-        assert captured.out.strip() == "", "stub walk_to must NOT emit IPC"
+        assert result.startswith("_walk_pending:"), f"expected pending sentinel, got {result!r}"
+        frames = [json.loads(l) for l in captured.out.splitlines() if l.strip()]
+        goto_frames = [f for f in frames if f.get("type") == "goto"]
+        assert len(goto_frames) == 1
+        assert goto_frames[0]["actor_uid"] == 42
 
-    def test_walk_to_any_target(self, agent):
+    def test_walk_to_sim_name(self, agent, capsys):
+        """walk_to a Sim name resolves via lot_avatars."""
+        # fixture has Gerry in lot_avatars at position {x:0,y:0,level:1}
         result = agent.handlers.handle_walk_to({"target": "Gerry"})
-        assert "arrived at Gerry" == result
+        captured = capsys.readouterr()
+        assert result.startswith("_walk_pending:"), f"expected pending sentinel, got {result!r}"
+        frames = [json.loads(l) for l in captured.out.splitlines() if l.strip()]
+        assert any(f.get("type") == "goto" for f in frames)
 
 
 # ---------------------------------------------------------------------------
