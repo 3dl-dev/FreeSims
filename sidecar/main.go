@@ -83,6 +83,11 @@ type jsonCommand struct {
 	ObjectPersistID uint32 `json:"object_persist_id,omitempty"`
 	// GUID is the catalog GUID for place-inventory (required when placing from inventory).
 	// For send-to-inventory the engine derives GUID from the live object.
+
+	// Dialog-response fields (reeims-9be)
+	DialogID     uint32 `json:"dialog_id,omitempty"`
+	Button       string `json:"button,omitempty"`       // "Yes", "No", "Cancel", or custom label
+	ResponseText string `json:"response_text,omitempty"` // free-text response (text-input dialogs)
 }
 
 // jsonArchOp mirrors ipc.ArchOp for JSON decoding.
@@ -167,6 +172,14 @@ func main() {
 	go func() {
 		for pf := range client.PathfindFailedCh {
 			out, _ := json.Marshal(pf)
+			fmt.Println(string(out))
+		}
+	}()
+
+	// Print dialog events to stdout as JSONL (reeims-9be)
+	go func() {
+		for de := range client.DialogCh {
+			out, _ := json.Marshal(de)
 			fmt.Println(string(out))
 		}
 	}()
@@ -417,6 +430,22 @@ func parseCommand(jcmd jsonCommand) (ipc.Command, error) {
 		return &ipc.QueryInventoryCmd{
 			ActorUID:  jcmd.ActorUID,
 			RequestID: jcmd.RequestID,
+		}, nil
+
+	case "dialog-response":
+		// Responds to a dialog event. dialog_id must match a pending dialog emitted by the game.
+		// button is the label of the chosen button ("Yes", "No", "Cancel", or a custom label).
+		// response_text is optional free-text input (for text-input dialogs).
+		if jcmd.DialogID == 0 {
+			return nil, fmt.Errorf("dialog-response command requires non-zero 'dialog_id'")
+		}
+		if jcmd.Button == "" {
+			return nil, fmt.Errorf("dialog-response command requires non-empty 'button'")
+		}
+		return &ipc.DialogResponseCmd{
+			DialogID:     jcmd.DialogID,
+			ResponseCode: ipc.ButtonLabelToResponseCode(jcmd.Button),
+			ResponseText: jcmd.ResponseText,
 		}, nil
 
 	default:

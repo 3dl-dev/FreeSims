@@ -74,6 +74,11 @@ type Client struct {
 	// perception events and replan routing without scanning PerceptionCh.
 	PathfindFailedCh chan PathfindFailed
 
+	// DialogCh receives dialog events (reeims-9be).
+	// Each event carries a dialog_id, title, text, and available buttons.
+	// Agents respond by sending a DialogResponseCmd with the matching dialog_id.
+	DialogCh chan DialogEvent
+
 	done chan struct{}
 }
 
@@ -86,6 +91,7 @@ func NewClient(sockPath string) *Client {
 		PerceptionCh:     make(chan []byte, 64),
 		ResponseCh:       make(chan ResponseFrame, 64),
 		PathfindFailedCh: make(chan PathfindFailed, 64),
+		DialogCh:         make(chan DialogEvent, 64),
 		done:             make(chan struct{}),
 	}
 }
@@ -254,6 +260,17 @@ func (c *Client) dispatchJSONFrame(payload []byte) {
 		case c.PathfindFailedCh <- pf:
 		default:
 			log.Printf("[ipc] pathfind-failed channel full, dropping event for sim_persist_id=%d", pf.SimPersistID)
+		}
+	case "dialog":
+		var de DialogEvent
+		if err := json.Unmarshal(payload, &de); err != nil {
+			log.Printf("[ipc] dialog frame unmarshal error: %v", err)
+			return
+		}
+		select {
+		case c.DialogCh <- de:
+		default:
+			log.Printf("[ipc] dialog channel full, dropping event dialog_id=%d", de.DialogID)
 		}
 	default:
 		// Forward unknown JSON types to perception channel for backward compat.

@@ -1026,6 +1026,287 @@ func TestQuerySimStateRoundTrip(t *testing.T) {
 	}
 }
 
+// TestDialogEventDispatch (reeims-9be) verifies that a dialog JSON frame emitted
+// by the game is dispatched to DialogCh and NOT to PerceptionCh or ResponseCh.
+//
+//  1. Create a socket pair (fake-game listener + client).
+//  2. Fake-game sends a dialog JSON frame.
+//  3. Verify the client dispatches it to DialogCh with correct fields.
+//  4. Verify PerceptionCh and ResponseCh are empty.
+func TestDialogEventDispatch(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "dialog.sock")
+
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		accepted <- conn
+	}()
+
+	client := NewClient(sockPath)
+	defer client.Close()
+
+	go func() {
+		_ = client.Connect()
+	}()
+
+	var gameConn net.Conn
+	select {
+	case gameConn = <-accepted:
+		defer gameConn.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for client connect")
+	}
+
+	sendFrame := func(payload []byte) {
+		t.Helper()
+		frame := make([]byte, 4+len(payload))
+		binary.LittleEndian.PutUint32(frame[0:4], uint32(len(payload)))
+		copy(frame[4:], payload)
+		if _, err := gameConn.Write(frame); err != nil {
+			t.Fatalf("write frame: %v", err)
+		}
+	}
+
+	// Send a dialog JSON frame
+	dialogJSON := []byte(`{"type":"dialog","dialog_id":7,"sim_persist_id":42,"title":"Hungry?","text":"You are hungry.","buttons":["Yes","No"]}`)
+	sendFrame(dialogJSON)
+
+	// Verify it arrives on DialogCh
+	select {
+	case de := <-client.DialogCh:
+		if de.Type != "dialog" {
+			t.Errorf("Type = %q, want dialog", de.Type)
+		}
+		if de.DialogID != 7 {
+			t.Errorf("DialogID = %d, want 7", de.DialogID)
+		}
+		if de.SimPersistID != 42 {
+			t.Errorf("SimPersistID = %d, want 42", de.SimPersistID)
+		}
+		if de.Title != "Hungry?" {
+			t.Errorf("Title = %q, want Hungry?", de.Title)
+		}
+		if de.Text != "You are hungry." {
+			t.Errorf("Text = %q, want You are hungry.", de.Text)
+		}
+		if len(de.Buttons) != 2 {
+			t.Fatalf("len(Buttons) = %d, want 2", len(de.Buttons))
+		}
+		if de.Buttons[0] != "Yes" {
+			t.Errorf("Buttons[0] = %q, want Yes", de.Buttons[0])
+		}
+		if de.Buttons[1] != "No" {
+			t.Errorf("Buttons[1] = %q, want No", de.Buttons[1])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for dialog event on DialogCh")
+	}
+
+	// Verify PerceptionCh is empty
+	select {
+	case p := <-client.PerceptionCh:
+		t.Errorf("PerceptionCh unexpectedly received: %s", string(p))
+	default:
+	}
+
+	// Verify ResponseCh is empty
+	select {
+	case rf := <-client.ResponseCh:
+		t.Errorf("ResponseCh unexpectedly received request_id=%s", rf.RequestID)
+	default:
+	}
+}
+
+// TestDialogResponseCmdSocketRoundTrip (reeims-9be) verifies the full
+// dialog-response command wire path:
+//
+//  1. Client sends a DialogResponseCmd with dialog_id=5, ResponseCode=0 (yes).
+//  2. Fake-game reads the frame and verifies the wire format:
+//     [type=11][dialogID=5 LE][responseCode=0][7bit-len(0)] = 7 bytes total.
+//  3. Verifies the dialog_id is encoded as ActorUID (bytes[1..4]).
+func TestDialogResponseCmdSocketRoundTrip(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "dresp.sock")
+
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		accepted <- conn
+	}()
+
+	client := NewClient(sockPath)
+	defer client.Close()
+
+	go func() {
+		_ = client.Connect()
+	}()
+
+	var gameConn net.Conn
+	select {
+	case gameConn = <-accepted:
+		defer gameConn.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for client connect")
+	}
+
+	// Send a dialog-response command
+	cmd := &DialogResponseCmd{DialogID: 5, ResponseCode: 0, ResponseText: ""}
+	payload, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal("serialize:", err)
+	}
+	if err := client.SendFrame(payload); err != nil {
+		t.Fatal("send:", err)
+	}
+
+	// Read from game side and verify wire format
+	gameConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var lenBuf [4]byte
+	if _, err := readFull(gameConn, lenBuf[:]); err != nil {
+		t.Fatal("read frame length:", err)
+	}
+	frameLen := binary.LittleEndian.Uint32(lenBuf[:])
+	frameBuf := make([]byte, frameLen)
+	if _, err := readFull(gameConn, frameBuf); err != nil {
+		t.Fatal("read frame payload:", err)
+	}
+
+	// Verify: [type=11][dialogID=5 LE][responseCode=0][7bit-len(0)=""] = 7 bytes
+	if frameBuf[0] != byte(CmdDialogResponse) {
+		t.Fatalf("type byte = %d, want %d (CmdDialogResponse=11)", frameBuf[0], CmdDialogResponse)
+	}
+	if len(frameBuf) != 6 { // payload is frameLen bytes (no type byte in payload? wait — type IS in payload)
+		// Actually: SerializeCommand includes the type byte.
+		// frameBuf is the payload AFTER length prefix. Length includes type byte.
+		// So frameBuf[0]=type, frameBuf[1..4]=dialogID, frameBuf[5]=code, frameBuf[6]=textLen
+	}
+	dialogID := binary.LittleEndian.Uint32(frameBuf[1:5])
+	if dialogID != 5 {
+		t.Errorf("DialogID = %d, want 5", dialogID)
+	}
+	if frameBuf[5] != 0 {
+		t.Errorf("ResponseCode = %d, want 0 (yes)", frameBuf[5])
+	}
+	// empty response text: 7-bit-len = 0
+	if frameBuf[6] != 0x00 {
+		t.Errorf("response_text length = 0x%02x, want 0x00", frameBuf[6])
+	}
+}
+
+// TestDialogEventInterleaved (reeims-9be) verifies that dialog events are correctly
+// dispatched even when interleaved with perception events and tick acks.
+func TestDialogEventInterleaved(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "dialog-interleaved.sock")
+
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		accepted <- conn
+	}()
+
+	client := NewClient(sockPath)
+	defer client.Close()
+
+	go func() {
+		_ = client.Connect()
+	}()
+
+	var gameConn net.Conn
+	select {
+	case gameConn = <-accepted:
+		defer gameConn.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for client connect")
+	}
+
+	sendFrame := func(payload []byte) {
+		t.Helper()
+		frame := make([]byte, 4+len(payload))
+		binary.LittleEndian.PutUint32(frame[0:4], uint32(len(payload)))
+		copy(frame[4:], payload)
+		if _, err := gameConn.Write(frame); err != nil {
+			t.Fatalf("write frame: %v", err)
+		}
+	}
+
+	// 1. Perception event
+	percJSON := []byte(`{"type":"perception","persist_id":1,"sim_id":1,"name":"Daisy"}`)
+	sendFrame(percJSON)
+
+	// 2. Dialog event
+	dialogJSON := []byte(`{"type":"dialog","dialog_id":3,"sim_persist_id":1,"title":"Rest?","text":"Sleep?","buttons":["Yes"]}`)
+	sendFrame(dialogJSON)
+
+	// 3. Tick ack (binary)
+	ackFrame := make([]byte, 4+ackPayloadSize)
+	binary.LittleEndian.PutUint32(ackFrame[0:4], ackPayloadSize)
+	binary.LittleEndian.PutUint32(ackFrame[4:8], 20)
+	binary.LittleEndian.PutUint32(ackFrame[8:12], 0)
+	binary.LittleEndian.PutUint64(ackFrame[12:20], 0)
+	if _, err := gameConn.Write(ackFrame); err != nil {
+		t.Fatal("write ack:", err)
+	}
+
+	// Verify perception on PerceptionCh
+	select {
+	case p := <-client.PerceptionCh:
+		if string(p) != string(percJSON) {
+			t.Errorf("perception = %q, want %q", string(p), string(percJSON))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for perception")
+	}
+
+	// Verify dialog on DialogCh
+	select {
+	case de := <-client.DialogCh:
+		if de.DialogID != 3 {
+			t.Errorf("DialogID = %d, want 3", de.DialogID)
+		}
+		if de.Title != "Rest?" {
+			t.Errorf("Title = %q, want Rest?", de.Title)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for dialog event")
+	}
+
+	// Verify tick ack on AckCh
+	select {
+	case ack := <-client.AckCh:
+		if ack.TickID != 20 {
+			t.Errorf("TickID = %d, want 20", ack.TickID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for ack")
+	}
+}
+
 func readFull(conn net.Conn, buf []byte) (int, error) {
 	total := 0
 	for total < len(buf) {

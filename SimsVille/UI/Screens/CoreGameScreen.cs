@@ -723,9 +723,11 @@ namespace FSO.Client.UI.Screens
 
 
             VMNetDriver driver;
+            VMIPCDriver ipcDriver = null;
             if (Environment.GetEnvironmentVariable("FREESIMS_IPC") == "1")
             {
-                driver = new VMIPCDriver();
+                ipcDriver = new VMIPCDriver();
+                driver = ipcDriver;
             }
             else if (host)
             {
@@ -745,8 +747,11 @@ namespace FSO.Client.UI.Screens
                 driver = new VMLocalDriver();
             }
 
-           
+
             vm.VM_SetDriver(driver);
+
+            // Wire dialog events to the IPC driver after the VM driver is set.
+            ipcDriver?.SubscribeToVM(vm);
 
 
 

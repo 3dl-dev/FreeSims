@@ -962,3 +962,129 @@ func TestQueryInventoryCmdSerialize_WithRequestID(t *testing.T) {
 		t.Errorf("requestID = %q, want %q", string(data[7:11]), "inv1")
 	}
 }
+
+// --- DialogResponseCmd tests (reeims-9be) ---
+
+func TestDialogResponseCmdType_Is11(t *testing.T) {
+	cmd := &DialogResponseCmd{}
+	if cmd.CmdType() != CmdDialogResponse {
+		t.Errorf("CmdType() = %d, want %d", cmd.CmdType(), CmdDialogResponse)
+	}
+	if byte(CmdDialogResponse) != 11 {
+		t.Errorf("CmdDialogResponse byte value = %d, want 11", byte(CmdDialogResponse))
+	}
+}
+
+func TestDialogResponseCmdSerialize_YesResponse(t *testing.T) {
+	// ResponseCode=0 (yes/ok), empty response text, dialog_id=5 as ActorUID.
+	cmd := &DialogResponseCmd{DialogID: 5, ResponseCode: 0, ResponseText: ""}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Layout: [type=11][dialogID:4 LE][responseCode:1][7bit-len(0)+""] = 7 bytes
+	if data[0] != byte(CmdDialogResponse) {
+		t.Fatalf("type byte = %d, want 11", data[0])
+	}
+	if len(data) != 7 {
+		t.Fatalf("total bytes = %d, want 7", len(data))
+	}
+	// ActorUID carries dialog_id
+	dialogID := binary.LittleEndian.Uint32(data[1:5])
+	if dialogID != 5 {
+		t.Errorf("DialogID (ActorUID) = %d, want 5", dialogID)
+	}
+	// responseCode
+	if data[5] != 0 {
+		t.Errorf("ResponseCode = %d, want 0 (yes)", data[5])
+	}
+	// empty string: 7-bit-len = 0
+	if data[6] != 0x00 {
+		t.Errorf("response_text length byte = 0x%02x, want 0x00", data[6])
+	}
+}
+
+func TestDialogResponseCmdSerialize_NoResponse(t *testing.T) {
+	cmd := &DialogResponseCmd{DialogID: 3, ResponseCode: 1, ResponseText: ""}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data[5] != 1 {
+		t.Errorf("ResponseCode = %d, want 1 (no)", data[5])
+	}
+}
+
+func TestDialogResponseCmdSerialize_CancelResponse(t *testing.T) {
+	cmd := &DialogResponseCmd{DialogID: 3, ResponseCode: 2, ResponseText: ""}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data[5] != 2 {
+		t.Errorf("ResponseCode = %d, want 2 (cancel)", data[5])
+	}
+}
+
+func TestDialogResponseCmdSerialize_WithResponseText(t *testing.T) {
+	cmd := &DialogResponseCmd{DialogID: 10, ResponseCode: 0, ResponseText: "Hello"}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Layout: [type=11][dialogID:4][code:1][7bit-len(5)]["Hello"] = 12 bytes
+	if len(data) != 12 {
+		t.Fatalf("total bytes = %d, want 12", len(data))
+	}
+	if data[6] != 0x05 {
+		t.Errorf("response_text length byte = 0x%02x, want 0x05", data[6])
+	}
+	if string(data[7:12]) != "Hello" {
+		t.Errorf("response_text = %q, want Hello", string(data[7:12]))
+	}
+}
+
+func TestDialogResponseCmdSerialize_DialogIdEncodedAsActorUID(t *testing.T) {
+	// Regression: dialog_id must be in bytes[1..4] (ActorUID field), not caller PersistID.
+	// VMIPCDriver maps dialog_id → CallerPersistID server-side.
+	const dialogID = uint32(99)
+	cmd := &DialogResponseCmd{DialogID: dialogID, ResponseCode: 0, ResponseText: ""}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := binary.LittleEndian.Uint32(data[1:5])
+	if got != dialogID {
+		t.Errorf("ActorUID = %d, want %d (dialog_id)", got, dialogID)
+	}
+}
+
+// --- ButtonLabelToResponseCode tests ---
+
+func TestButtonLabelToResponseCode_Yes(t *testing.T) {
+	for _, label := range []string{"Yes", "yes", "OK", "ok", "Confirm", "Sure", ""} {
+		code := ButtonLabelToResponseCode(label)
+		if code != 0 {
+			t.Errorf("ButtonLabelToResponseCode(%q) = %d, want 0 (yes/ok)", label, code)
+		}
+	}
+}
+
+func TestButtonLabelToResponseCode_No(t *testing.T) {
+	for _, label := range []string{"No", "no"} {
+		code := ButtonLabelToResponseCode(label)
+		if code != 1 {
+			t.Errorf("ButtonLabelToResponseCode(%q) = %d, want 1 (no)", label, code)
+		}
+	}
+}
+
+func TestButtonLabelToResponseCode_Cancel(t *testing.T) {
+	for _, label := range []string{"Cancel", "cancel"} {
+		code := ButtonLabelToResponseCode(label)
+		if code != 2 {
+			t.Errorf("ButtonLabelToResponseCode(%q) = %d, want 2 (cancel)", label, code)
+		}
+	}
+}
