@@ -1,0 +1,15 @@
+{
+  "convention": "freesims",
+  "version": "1.0",
+  "operation": "delete-object",
+  "description": "Remove an object from the lot. You get partial refund of the purchase price.",
+  "args": [
+    {"name": "sim_id", "type": "integer", "required": true, "description": "PersistID of the requesting Sim"},
+    {"name": "object_id", "type": "integer", "required": true, "description": "object_id of the object to delete"}
+  ],
+  "produces_tags": [{"tag": "freesims:delete-object", "cardinality": "exactly_one"}],
+  "antecedents": "none",
+  "signing": "member_key",
+  "rate_limit": {"max": 10, "per": "sender", "window": "1m"},
+  "response": "sync"
+}

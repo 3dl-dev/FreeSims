@@ -124,6 +124,11 @@ func StartConventionServer(ctx context.Context, ipcClient *ipc.Client) (lotID st
 		"query-sim-state": querySimStateHandler(ipcClient),
 		"query-catalog":   queryCatalogHandler(ipcClient),
 		"sim-action":      simActionHandler(ipcClient),
+		"buy":             buyHandler(ipcClient),
+		"save-sim":        saveSimHandler(ipcClient),
+		"load-lot":        loadLotHandler(ipcClient),
+		"move-object":     moveObjectHandler(ipcClient),
+		"delete-object":   deleteObjectHandler(ipcClient),
 	}
 
 	for _, decl := range decls {
@@ -422,6 +427,108 @@ func simActionHandler(ipcClient *ipc.Client) convention.HandlerFunc {
 			return errResp(err.Error()), nil
 		}
 		return okResp(map[string]any{"action": action, "sim_id": simID}), nil
+	}
+}
+
+// buyHandler places a catalog object on the lot.
+func buyHandler(ipcClient *ipc.Client) convention.HandlerFunc {
+	return func(ctx context.Context, req *convention.Request) (*convention.Response, error) {
+		simID, _ := argInt(req.Args, "sim_id")
+		guid, ok := argInt(req.Args, "guid")
+		if !ok || guid == 0 {
+			return errResp("missing or zero guid — use query-catalog to find GUIDs"), nil
+		}
+		x, _ := argInt(req.Args, "x")
+		y, _ := argInt(req.Args, "y")
+		level, _ := argInt(req.Args, "level")
+		if level == 0 { level = 1 }
+		dir, _ := argInt(req.Args, "dir")
+
+		cmd := &ipc.BuyObjectCmd{
+			ActorUID: uint32(simID), GUID: uint32(guid),
+			X: int16(x), Y: int16(y), Level: int8(level), Dir: byte(dir),
+		}
+		if err := sendIPC(ipcClient, cmd); err != nil {
+			return errResp(err.Error()), nil
+		}
+		return okResp(map[string]any{"guid": guid, "x": x, "y": y}), nil
+	}
+}
+
+// saveSimHandler persists a Sim's state to disk.
+func saveSimHandler(ipcClient *ipc.Client) convention.HandlerFunc {
+	return func(ctx context.Context, req *convention.Request) (*convention.Response, error) {
+		simID, _ := argInt(req.Args, "sim_id")
+		filename, _ := req.Args["filename"].(string)
+		if filename == "" {
+			return errResp("missing filename"), nil
+		}
+		reqID := fmt.Sprintf("ss-%s", req.MessageID[:8])
+		cmd := &ipc.SaveSimCmd{ActorUID: uint32(simID), RequestID: reqID, Filename: filename}
+		result, err := queryWithCorrelation(ipcClient, cmd, reqID, 10*time.Second)
+		if err != nil {
+			return errResp(err.Error()), nil
+		}
+		return okResp(result), nil
+	}
+}
+
+// loadLotHandler switches to a different lot.
+func loadLotHandler(ipcClient *ipc.Client) convention.HandlerFunc {
+	return func(ctx context.Context, req *convention.Request) (*convention.Response, error) {
+		simID, _ := argInt(req.Args, "sim_id")
+		houseXml, _ := req.Args["house_xml"].(string)
+		if houseXml == "" {
+			return errResp("missing house_xml"), nil
+		}
+		reqID := fmt.Sprintf("ll-%s", req.MessageID[:8])
+		cmd := &ipc.LoadLotCmd{ActorUID: uint32(simID), HouseXml: houseXml, RequestID: reqID}
+		result, err := queryWithCorrelation(ipcClient, cmd, reqID, 15*time.Second)
+		if err != nil {
+			return errResp(err.Error()), nil
+		}
+		return okResp(result), nil
+	}
+}
+
+// moveObjectHandler repositions an object on the lot.
+func moveObjectHandler(ipcClient *ipc.Client) convention.HandlerFunc {
+	return func(ctx context.Context, req *convention.Request) (*convention.Response, error) {
+		simID, _ := argInt(req.Args, "sim_id")
+		objID, ok := argInt(req.Args, "object_id")
+		if !ok {
+			return errResp("missing object_id"), nil
+		}
+		x, _ := argInt(req.Args, "x")
+		y, _ := argInt(req.Args, "y")
+		level, _ := argInt(req.Args, "level")
+		if level == 0 { level = 1 }
+		dir, _ := argInt(req.Args, "dir")
+
+		cmd := &ipc.MoveObjectCmd{
+			ActorUID: uint32(simID), ObjectID: int16(objID),
+			X: int16(x), Y: int16(y), Level: int8(level), Dir: byte(dir),
+		}
+		if err := sendIPC(ipcClient, cmd); err != nil {
+			return errResp(err.Error()), nil
+		}
+		return okResp(map[string]any{"object_id": objID, "x": x, "y": y}), nil
+	}
+}
+
+// deleteObjectHandler removes an object from the lot.
+func deleteObjectHandler(ipcClient *ipc.Client) convention.HandlerFunc {
+	return func(ctx context.Context, req *convention.Request) (*convention.Response, error) {
+		simID, _ := argInt(req.Args, "sim_id")
+		objID, ok := argInt(req.Args, "object_id")
+		if !ok {
+			return errResp("missing object_id"), nil
+		}
+		cmd := &ipc.DeleteObjectCmd{ActorUID: uint32(simID), ObjectID: int16(objID)}
+		if err := sendIPC(ipcClient, cmd); err != nil {
+			return errResp(err.Error()), nil
+		}
+		return okResp(map[string]any{"object_id": objID, "deleted": true}), nil
 	}
 }
 

@@ -1,0 +1,15 @@
+{
+  "convention": "freesims",
+  "version": "1.0",
+  "operation": "save-sim",
+  "description": "Save your current state (motives, skills, relationships, inventory) to a file. You can be restored later with load-sim.",
+  "args": [
+    {"name": "sim_id", "type": "integer", "required": true, "description": "PersistID of the Sim to save"},
+    {"name": "filename", "type": "string", "required": true, "maxLength": 64, "description": "Save file name (no path separators, stored under Content/Saves/)"}
+  ],
+  "produces_tags": [{"tag": "freesims:save-sim", "cardinality": "exactly_one"}],
+  "antecedents": "none",
+  "signing": "member_key",
+  "rate_limit": {"max": 5, "per": "sender", "window": "1m"},
+  "response": "sync"
+}

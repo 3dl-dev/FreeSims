@@ -1,0 +1,15 @@
+{
+  "convention": "freesims",
+  "version": "1.0",
+  "operation": "load-lot",
+  "description": "Move to a different lot (house). This changes the entire environment — new objects, new layout. Available lots: house1.xml, house2.xml, empty_lot.xml.",
+  "args": [
+    {"name": "sim_id", "type": "integer", "required": true, "description": "PersistID of the requesting Sim"},
+    {"name": "house_xml", "type": "string", "required": true, "maxLength": 64, "description": "House file name (e.g. house1.xml, house2.xml)"}
+  ],
+  "produces_tags": [{"tag": "freesims:load-lot", "cardinality": "exactly_one"}],
+  "antecedents": "none",
+  "signing": "member_key",
+  "rate_limit": {"max": 2, "per": "sender", "window": "1m"},
+  "response": "sync"
+}
