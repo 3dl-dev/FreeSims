@@ -30,6 +30,7 @@ type Perception struct {
 	CurrentAnimation string         `json:"current_animation"`
 	ActionQueue      []QueuedAction `json:"action_queue"`
 	NearbyObjects    []NearbyObject `json:"nearby_objects"`
+	LotAvatars       []LotAvatar    `json:"lot_avatars"`
 }
 
 // Motives holds the eight core motive values plus derived mood.
@@ -72,4 +73,27 @@ type NearbyObject struct {
 type Interaction struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
+}
+
+// LotAvatarMotives holds the eight core motive values plus derived mood for a lot avatar.
+// Note: room motive is excluded (not part of the lot_avatars spec — reeims-d37).
+type LotAvatarMotives struct {
+	Hunger  int16 `json:"hunger"`
+	Comfort int16 `json:"comfort"`
+	Energy  int16 `json:"energy"`
+	Hygiene int16 `json:"hygiene"`
+	Bladder int16 `json:"bladder"`
+	Social  int16 `json:"social"`
+	Fun     int16 `json:"fun"`
+	Mood    int16 `json:"mood"`
+}
+
+// LotAvatar describes another Sim present on the lot (reeims-d37).
+// Self (the Sim whose perception is being emitted) is excluded by persist_id.
+type LotAvatar struct {
+	PersistID        uint32           `json:"persist_id"`
+	Name             string           `json:"name"`
+	Position         Position         `json:"position"`
+	CurrentAnimation string           `json:"current_animation"`
+	Motives          LotAvatarMotives `json:"motives"`
 }
