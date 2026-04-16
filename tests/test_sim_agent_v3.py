@@ -84,6 +84,9 @@ def agent():
     a.walk_start_tick = 0
     a.walk_result = None
     a.walk_event = asyncio.Event()
+    a.interact_object_id = 0
+    a.interact_result = None
+    a.interact_event = asyncio.Event()
     a.handlers = ToolHandlers(a)
     return a
 
@@ -212,19 +215,25 @@ class TestWalkToStub:
 
 
 # ---------------------------------------------------------------------------
-# interact stub — returns placeholder
+# interact — unknown target / verb error cases (reeims-3f8 replaced stub)
 # ---------------------------------------------------------------------------
 
 class TestInteractStub:
-    def test_interact_returns_did(self, agent, capsys):
-        result = agent.handlers.handle_interact({"target": "refrigerator", "verb": "eat"})
-        assert result == "did eat refrigerator"
-        captured = capsys.readouterr()
-        assert captured.out.strip() == "", "stub interact must NOT emit IPC"
+    def test_interact_unknown_target(self, agent):
+        """Target not in nearby_objects → cannot find message."""
+        result = agent.handlers.handle_interact({"target": "moon", "verb": "eat"})
+        assert "cannot find" in result and "moon" in result
 
-    def test_interact_default_verb(self, agent):
-        result = agent.handlers.handle_interact({"target": "sofa"})
-        assert "use" in result or "sofa" in result
+    def test_interact_unknown_verb(self, agent):
+        """Known target, unknown verb → unknown verb message."""
+        # Patch nearby_objects to include interactions
+        agent.last_perception["nearby_objects"] = [
+            {"name": "Refrigerator", "object_id": 101,
+             "position": {"x": 3, "y": 5, "level": 1}, "distance": 4.0,
+             "interactions": [{"id": 0, "name": "Have Snack"}]}
+        ]
+        result = agent.handlers.handle_interact({"target": "refrigerator", "verb": "juggle"})
+        assert "unknown verb: juggle" == result
 
 
 # ---------------------------------------------------------------------------

@@ -227,8 +227,7 @@ class ToolHandlers:
     # --- WIRED: wait ---
     def handle_wait(self, args: dict) -> str:
         seconds = int(args.get("seconds", 5))
-        # [ATTENTION SEAM] sets wait_until_tick on the agent's IntentState.
-        # should_think() trigger 7 reads this to suppress LLM calls until elapsed.
+        # [ATTENTION SEAM] sets wait_until_tick; should_think() T7 reads it.
         in_game_ticks = max(1, seconds)
         self.agent.wait_until_tick = self.agent.tick + in_game_ticks
         return f"waiting {seconds}s (in-game)"
@@ -238,8 +237,7 @@ class ToolHandlers:
         note = str(args.get("note", "")).strip()
         if not note:
             return "nothing to remember"
-        # [MEMORY SEAM] reeims-dd0 will implement compaction over self.agent.memories.
-        self.agent.memories.append(note)
+        self.agent.memories.append(note)  # [MEMORY SEAM] reeims-dd0
         _log(self.agent.log_path, {"event": "memory", "note": note})
         return f"remembered: {note}"
 
@@ -312,11 +310,95 @@ class ToolHandlers:
             self.agent.walk_result = f"timed out walking to {target}"
         return self.agent.walk_result or f"arrived at {target}"
 
-    # --- STUB: interact (reeims-3f8 will implement) ---
+    # --- WIRED: interact (reeims-3f8) ---
+    # Verb→TTAB interaction name fragments. Matched case-insensitively against
+    # nearby_objects[].interactions[].name (from PerceptionEmitter.cs:106-110,
+    # VMAI.cs:136, VMActionCallback.cs:58-61). TTAB IDs are object-specific;
+    # action_id is resolved at runtime by name match, not hardcoded.
+    # TS1 object interaction names (from TreeTableStrings/STR# chunk):
+    #   Fridge: "Have Snack"/"Make Meal"; Toilet: "Use"; Shower: "Take Shower";
+    #   Bed: "Sleep"/"Nap"; Sofa: "Sit"; TV: "Watch"; Bookshelf: "Read"/"Study";
+    #   Piano/Easel: "Play"/"Paint"; Sink: "Wash Hands"; Bar/Keg: "Drink"/"Pour"
+    VERB_FRAGMENTS: dict[str, list[str]] = {
+        "eat":        ["have snack", "make meal", "eat", "have a snack"],
+        "drink":      ["drink", "pour", "get a drink", "have a drink"],
+        "sit":        ["sit", "relax"],
+        "sleep":      ["sleep", "nap", "go to sleep"],
+        "shower":     ["take shower", "shower", "take bath", "bathe"],
+        "use-toilet": ["use", "flush"],
+        "wash":       ["wash hands", "wash", "clean hands"],
+        "watch":      ["watch", "turn on", "view"],
+        "read":       ["read", "study", "browse"],
+        "play":       ["play", "practice", "paint", "sketch"],
+    }
+
+    def _resolve_interact_target(self, target: str, perception: dict) -> "dict | None":
+        """(a) numeric object_id lookup; (b) name substr; (b2) landmark table fallback."""
+        nearby = perception.get("nearby_objects") or []
+        tl = target.lower().strip()
+        if tl.isdigit():
+            oid = int(tl)
+            return next((o for o in nearby if o.get("object_id") == oid), None)
+        for obj in nearby:
+            obj_name = (obj.get("name") or "").lower()
+            if tl in obj_name or obj_name in tl:
+                return obj
+        landmark_ref = build_landmark_table(nearby).get(tl)
+        if landmark_ref is not None:
+            return next((o for o in nearby if o.get("object_id") == landmark_ref.object_id), None)
+        return None
+
+    def _resolve_interact_action_id(self, obj: dict, verb: str) -> "int | None":
+        """Match verb fragments against pie menu interaction names; return TTAB slot id."""
+        fragments = self.VERB_FRAGMENTS.get(verb.lower())
+        if fragments is None:
+            return None
+        interactions = obj.get("interactions") or []
+        for frag in fragments:
+            for ix in interactions:
+                if frag in (ix.get("name") or "").lower():
+                    return ix.get("id")
+        return None
+
     def handle_interact(self, args: dict) -> str:
         target = str(args.get("target", "")).strip()
-        verb = str(args.get("verb", "use")).strip()
-        return f"did {verb} {target}"
+        verb = str(args.get("verb", "")).strip().lower()
+        if not target:
+            return "error: target required"
+        agent = self.agent
+        p = agent.last_perception or {}
+        obj = self._resolve_interact_target(target, p)
+        if obj is None:
+            return f"cannot find {target} nearby"
+
+        if verb and verb not in self.VERB_FRAGMENTS:
+            return f"unknown verb: {verb}"
+        interactions = obj.get("interactions") or []
+        action_id = (self._resolve_interact_action_id(obj, verb) if verb else None)
+        if action_id is None:
+            action_id = interactions[0].get("id", 0) if interactions else None
+        if action_id is None:
+            return f"no interactions available on {obj.get('name', target)}"
+        if float(obj.get("distance", 0)) > 160:  # >10 tiles (1/16 tile units)
+            return "too far"
+        object_id = obj.get("object_id", 0)
+        agent.interact_object_id = object_id
+        agent.interact_result = None
+        agent.interact_event = asyncio.Event()
+        _send({"type": "interact", "object_id": object_id, "action_id": action_id},
+              agent.actor_uid, agent.log_path)
+        return f"_interact_pending:{target}"
+
+    async def handle_interact_async(self, args: dict) -> str:
+        sync = self.handle_interact(args)
+        if not sync.startswith("_interact_pending:"):
+            return sync
+        target = args.get("target", "")
+        try:
+            await asyncio.wait_for(self.agent.interact_event.wait(), timeout=30)
+        except asyncio.TimeoutError:
+            self.agent.interact_result = f"timed out waiting for interact on {target}"
+        return self.agent.interact_result or f"done interacting with {target}"
 
     def dispatch(self, tool_name: str, args: dict) -> str:
         """Dispatch a tool call by name. Returns string result for tool_result."""
@@ -401,7 +483,7 @@ def _build_sdk_tools(handlers: ToolHandlers) -> list:
         },
     )
     async def interact(args: dict) -> dict:
-        result = handlers.handle_interact(args)
+        result = await handlers.handle_interact_async(args)
         return {"content": [{"type": "text", "text": result}]}
 
     return [say, wait, remember, look_around, walk_to, interact]
@@ -425,6 +507,9 @@ class SimAgentV3:
         self.walk_start_tick: int = 0
         self.walk_result: str | None = None
         self.walk_event: asyncio.Event = asyncio.Event()
+        self.interact_object_id: int = 0         # interact-await state (reeims-3f8)
+        self.interact_result: str | None = None
+        self.interact_event: asyncio.Event = asyncio.Event()
 
     @property
     def wait_until_tick(self) -> int:
@@ -500,7 +585,8 @@ class SimAgentV3:
         _log(self.log_path, {"event": "perception", "tick": self.tick,
                              "clock": data.get("clock"), "motives": data.get("motives")})
 
-        self._check_walk_arrival(data)  # [WALK SEAM] signal arrival/failure/timeout
+        self._check_walk_arrival(data)      # [WALK SEAM] signal arrival/failure/timeout
+        self._check_interact_complete(data)  # [INTERACT SEAM] signal interact-complete
         wake, reason = should_think(data, self.intent, self.tick)  # [ATTENTION SEAM]
         if not wake:
             _log(self.log_path, {"event": "attention_skip", "tick": self.tick, "reason": reason})
@@ -516,10 +602,7 @@ class SimAgentV3:
         asyncio.run(self._call_llm(data))
 
     def _resolve_walk(self, result: str) -> None:
-        """Complete the pending walk with result string and signal the event."""
-        self.walk_result = result
-        self.walk_target = None
-        self.walk_event.set()
+        self.walk_result = result; self.walk_target = None; self.walk_event.set()
 
     def _check_walk_arrival(self, perception: dict) -> None:
         """Signal walk_event on arrival, pathfind-failed, or 30-tick timeout."""
@@ -534,6 +617,19 @@ class SimAgentV3:
         dx, dy = pos.get("x", 0) - self.walk_target.x, pos.get("y", 0) - self.walk_target.y
         if dx * dx + dy * dy <= 4:
             self._resolve_walk(f"arrived at {self.walk_target.name}")
+
+    def _resolve_interact(self, result: str) -> None:
+        self.interact_result = result; self.interact_object_id = 0; self.interact_event.set()
+
+    def _check_interact_complete(self, perception: dict) -> None:
+        if self.interact_event.is_set() or self.interact_object_id == 0:
+            return
+        for ev in (perception.get("recent_events") or []):
+            if not isinstance(ev, dict): continue
+            t = ev.get("type")
+            if t == "interact-complete": self._resolve_interact("done interacting"); return
+            if t == "pathfind-failed":
+                self._resolve_interact(f"blocked: {ev.get('reason') or 'path blocked'}"); return
 
     def on_response(self, data: dict) -> None: _log(self.log_path, {"event": "ipc_in", "frame": data})
     def on_dialog(self, data: dict) -> None: _log(self.log_path, {"event": "ipc_in", "frame": data})
@@ -593,6 +689,11 @@ def main() -> None:
         elif msg_type == "pathfind-failed":
             if agent.actor_uid != 0 and data.get("sim_persist_id") == agent.actor_uid:
                 agent.on_pathfind_failed(data)
+
+        elif msg_type == "interact-complete":
+            if agent.actor_uid != 0 and data.get("sim_persist_id") == agent.actor_uid:
+                if agent.interact_object_id != 0 and not agent.interact_event.is_set():
+                    agent._resolve_interact("done interacting")
 
 
 if __name__ == "__main__":
