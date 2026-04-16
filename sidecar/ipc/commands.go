@@ -28,6 +28,7 @@ const (
 	CmdDeleteObject      VMCommandType = 9
 	CmdGoto              VMCommandType = 10
 	CmdChangeLotSize     VMCommandType = 25
+	CmdQueryCatalog      VMCommandType = 36
 )
 
 // ArchCommandType mirrors the C# VMArchitectureCommandType enum (byte).
@@ -376,5 +377,41 @@ func (c *ArchitectureCmd) Serialize(buf *bytes.Buffer) error {
 		binary.LittleEndian.PutUint16(b[20:22], op.Style)
 		buf.Write(b)
 	}
+	return nil
+}
+
+// --- QueryCatalog command ---
+//
+// Wire format (after VMCommandType byte):
+//
+//	[ActorUID: 4 bytes LE]
+//	[category: 7-bit-length-prefixed UTF-8 string]  — "all" or a FunctionFlags category name
+//	[hasRequestID: byte]
+//	[if 1: 7-bit-length-prefixed UTF-8 request ID]
+//
+// The game engine responds with a JSON response frame (type="response") whose
+// payload contains a "catalog" array of up to 500 entries:
+//
+//	{"type":"response","request_id":"...","status":"ok",
+//	 "payload":{"catalog":[{"guid":N,"name":"...","price":N,"category":"...","subcategory":"..."}...]}}
+//
+// The category filter accepts "all" (or "") to return all objects, or a named
+// category string (e.g. "seating", "appliances") to filter by FunctionFlags.
+type QueryCatalogCmd struct {
+	ActorUID  uint32
+	Category  string // "all" or a category name; empty means "all"
+	RequestID string // optional correlation ID
+}
+
+func (c *QueryCatalogCmd) CmdType() VMCommandType { return CmdQueryCatalog }
+
+func (c *QueryCatalogCmd) Serialize(buf *bytes.Buffer) error {
+	writeActorUID(buf, c.ActorUID)
+	cat := c.Category
+	if cat == "" {
+		cat = "all"
+	}
+	writeBinaryString(buf, cat)
+	writeRequestIDTail(buf, c.RequestID)
 	return nil
 }

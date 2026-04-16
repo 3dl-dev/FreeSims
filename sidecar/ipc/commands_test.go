@@ -398,3 +398,116 @@ func TestChatLongMessageTruncation(t *testing.T) {
 		t.Errorf("total length = %d, want 208", len(data))
 	}
 }
+
+// --- QueryCatalogCmd tests (reeims-af0) ---
+
+func TestQueryCatalogCmdSerialize_AllCategory_NoRequestID(t *testing.T) {
+	cmd := &QueryCatalogCmd{ActorUID: 1, Category: "all", RequestID: ""}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Layout: [type=36][actorUID:4][len(3)+"all"][hasRequestID=0]
+	// Total: 1 + 4 + 1 + 3 + 1 = 10
+	if data[0] != byte(CmdQueryCatalog) {
+		t.Errorf("type byte = %d, want %d (CmdQueryCatalog)", data[0], CmdQueryCatalog)
+	}
+
+	uid := binary.LittleEndian.Uint32(data[1:5])
+	if uid != 1 {
+		t.Errorf("ActorUID = %d, want 1", uid)
+	}
+
+	// category "all": length byte = 3
+	if data[5] != 0x03 {
+		t.Errorf("category length byte = 0x%02x, want 0x03", data[5])
+	}
+	cat := string(data[6:9])
+	if cat != "all" {
+		t.Errorf("category = %q, want %q", cat, "all")
+	}
+
+	// hasRequestID = 0
+	if data[9] != 0x00 {
+		t.Errorf("hasRequestID = 0x%02x, want 0x00", data[9])
+	}
+
+	if len(data) != 10 {
+		t.Errorf("total length = %d, want 10", len(data))
+	}
+}
+
+func TestQueryCatalogCmdSerialize_WithRequestID(t *testing.T) {
+	cmd := &QueryCatalogCmd{ActorUID: 28, Category: "all", RequestID: "qc1"}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Layout: [type=36][actorUID:4][len(3)+"all"][hasRequestID=1][len(3)+"qc1"]
+	// Total: 1 + 4 + 1 + 3 + 1 + 1 + 3 = 14
+	if data[0] != byte(CmdQueryCatalog) {
+		t.Errorf("type byte = %d, want %d", data[0], CmdQueryCatalog)
+	}
+
+	uid := binary.LittleEndian.Uint32(data[1:5])
+	if uid != 28 {
+		t.Errorf("ActorUID = %d, want 28", uid)
+	}
+
+	// category "all" at offset 5
+	if data[5] != 0x03 {
+		t.Errorf("category length = 0x%02x, want 0x03", data[5])
+	}
+
+	// hasRequestID flag at offset 9
+	if data[9] != 0x01 {
+		t.Errorf("hasRequestID = 0x%02x, want 0x01", data[9])
+	}
+
+	// "qc1" length byte at offset 10
+	if data[10] != 0x03 {
+		t.Errorf("requestID length = 0x%02x, want 0x03", data[10])
+	}
+	reqID := string(data[11:14])
+	if reqID != "qc1" {
+		t.Errorf("requestID = %q, want %q", reqID, "qc1")
+	}
+
+	if len(data) != 14 {
+		t.Errorf("total length = %d, want 14", len(data))
+	}
+}
+
+func TestQueryCatalogCmdSerialize_CategoryFilter(t *testing.T) {
+	cmd := &QueryCatalogCmd{ActorUID: 5, Category: "seating", RequestID: ""}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// category "seating" = 7 bytes
+	if data[5] != 0x07 {
+		t.Errorf("category length = 0x%02x, want 0x07", data[5])
+	}
+	cat := string(data[6:13])
+	if cat != "seating" {
+		t.Errorf("category = %q, want %q", cat, "seating")
+	}
+
+	// hasRequestID = 0
+	if data[13] != 0x00 {
+		t.Errorf("hasRequestID = 0x%02x, want 0x00", data[13])
+	}
+}
+
+func TestQueryCatalogCmdType_Is36(t *testing.T) {
+	cmd := &QueryCatalogCmd{}
+	if cmd.CmdType() != CmdQueryCatalog {
+		t.Errorf("CmdType() = %d, want %d", cmd.CmdType(), CmdQueryCatalog)
+	}
+	if byte(CmdQueryCatalog) != 36 {
+		t.Errorf("CmdQueryCatalog byte value = %d, want 36", byte(CmdQueryCatalog))
+	}
+}
