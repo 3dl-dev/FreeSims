@@ -32,6 +32,7 @@ type Perception struct {
 	NearbyObjects    []NearbyObject `json:"nearby_objects"`
 	LotAvatars       []LotAvatar    `json:"lot_avatars"`
 	Skills           Skills         `json:"skills"`             // TS1 skill values (§reeims-edc)
+	Job              Job            `json:"job"`                // career state (§reeims-930)
 }
 
 // Motives holds the eight core motive values plus derived mood.
@@ -86,6 +87,24 @@ type Skills struct {
 	Creativity int16 `json:"creativity"`
 	Body       int16 `json:"body"`
 	Logic      int16 `json:"logic"`
+}
+
+// Job holds the Sim's current career state (§reeims-930).
+//
+// has_job is true when PersonData[JobType] > 0 (CARR chunk ID is the career track).
+// career is the career track name from the CARR chunk; null in this fork because
+// TS1JobProvider (Content.Jobs) is not wired — CARR name lookup is a known gap.
+// level is the 0-based promotion level within the track (PersonData[JobPromotionLevel]).
+// salary and work_hours are zero/null for the same reason — require TS1JobProvider.
+type Job struct {
+	HasJob    bool    `json:"has_job"`
+	Career    *string `json:"career"`     // null: TS1JobProvider not wired (known gap)
+	Level     int     `json:"level"`
+	Salary    int     `json:"salary"`     // 0: TS1JobProvider not wired (known gap)
+	WorkHours *struct {
+		Start int `json:"start"`
+		End   int `json:"end"`
+	} `json:"work_hours"` // null: TS1JobProvider not wired (known gap)
 }
 
 // LotAvatarMotives holds the eight core motive values plus derived mood for a lot avatar.
