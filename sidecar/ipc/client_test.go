@@ -1777,6 +1777,265 @@ func TestLoadSimRoundTrip(t *testing.T) {
 	}
 }
 
+// --- chat_received dispatch tests (reeims-7a6) ---
+
+// TestChatReceivedDispatch verifies that a chat_received JSON frame emitted by the
+// game is dispatched to ChatCh with correct fields and NOT to PerceptionCh or
+// ResponseCh.
+//
+//  1. Create a socket pair (fake-game listener + client).
+//  2. Fake-game sends a chat_received JSON frame.
+//  3. Verify the client dispatches it to ChatCh with correct fields.
+//  4. Verify PerceptionCh and ResponseCh are empty.
+func TestChatReceivedDispatch(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "chat-recv.sock")
+
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		accepted <- conn
+	}()
+
+	client := NewClient(sockPath)
+	defer client.Close()
+
+	go func() { _ = client.Connect() }()
+
+	var gameConn net.Conn
+	select {
+	case gameConn = <-accepted:
+		defer gameConn.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for client connect")
+	}
+
+	sendFrame := func(payload []byte) {
+		t.Helper()
+		frame := make([]byte, 4+len(payload))
+		binary.LittleEndian.PutUint32(frame[0:4], uint32(len(payload)))
+		copy(frame[4:], payload)
+		if _, err := gameConn.Write(frame); err != nil {
+			t.Fatalf("write frame: %v", err)
+		}
+	}
+
+	// Send a chat_received JSON frame
+	chatJSON := []byte(`{"type":"chat_received","sender_persist_id":42,"sender_name":"Gerry","text":"hello Gerry","recipient_persist_ids":[7,8]}`)
+	sendFrame(chatJSON)
+
+	// Verify it arrives on ChatCh with correct fields.
+	select {
+	case cr := <-client.ChatCh:
+		if cr.Type != "chat_received" {
+			t.Errorf("Type = %q, want chat_received", cr.Type)
+		}
+		if cr.SenderPersistID != 42 {
+			t.Errorf("SenderPersistID = %d, want 42", cr.SenderPersistID)
+		}
+		if cr.SenderName != "Gerry" {
+			t.Errorf("SenderName = %q, want Gerry", cr.SenderName)
+		}
+		if cr.Text != "hello Gerry" {
+			t.Errorf("Text = %q, want hello Gerry", cr.Text)
+		}
+		if len(cr.RecipientPersistIDs) != 2 {
+			t.Fatalf("len(RecipientPersistIDs) = %d, want 2", len(cr.RecipientPersistIDs))
+		}
+		if cr.RecipientPersistIDs[0] != 7 {
+			t.Errorf("RecipientPersistIDs[0] = %d, want 7", cr.RecipientPersistIDs[0])
+		}
+		if cr.RecipientPersistIDs[1] != 8 {
+			t.Errorf("RecipientPersistIDs[1] = %d, want 8", cr.RecipientPersistIDs[1])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for chat_received event on ChatCh")
+	}
+
+	// Verify PerceptionCh is empty (event was NOT forwarded there).
+	select {
+	case p := <-client.PerceptionCh:
+		t.Errorf("PerceptionCh unexpectedly received: %s", string(p))
+	default:
+		// correct: PerceptionCh should be empty
+	}
+
+	// Verify ResponseCh is empty.
+	select {
+	case rf := <-client.ResponseCh:
+		t.Errorf("ResponseCh unexpectedly received request_id=%s", rf.RequestID)
+	default:
+		// correct: ResponseCh should be empty
+	}
+}
+
+// TestChatReceivedInterleaved verifies that chat_received events are correctly
+// dispatched even when interleaved with perception events, dialog events, and
+// tick acks — matching the pattern from TestPathfindFailedInterleaved.
+func TestChatReceivedInterleaved(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "chat-interleaved.sock")
+
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		accepted <- conn
+	}()
+
+	client := NewClient(sockPath)
+	defer client.Close()
+
+	go func() { _ = client.Connect() }()
+
+	var gameConn net.Conn
+	select {
+	case gameConn = <-accepted:
+		defer gameConn.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for client connect")
+	}
+
+	sendFrame := func(payload []byte) {
+		t.Helper()
+		frame := make([]byte, 4+len(payload))
+		binary.LittleEndian.PutUint32(frame[0:4], uint32(len(payload)))
+		copy(frame[4:], payload)
+		if _, err := gameConn.Write(frame); err != nil {
+			t.Fatalf("write frame: %v", err)
+		}
+	}
+
+	// 1. Perception event (should go to PerceptionCh)
+	percJSON := []byte(`{"type":"perception","persist_id":1,"sim_id":1,"name":"Daisy"}`)
+	sendFrame(percJSON)
+
+	// 2. Chat received event (should go to ChatCh)
+	chatJSON := []byte(`{"type":"chat_received","sender_persist_id":5,"sender_name":"Bob","text":"Hey!","recipient_persist_ids":[1]}`)
+	sendFrame(chatJSON)
+
+	// 3. Tick ack (binary, 16 bytes — should go to AckCh)
+	ackFrame := make([]byte, 4+ackPayloadSize)
+	binary.LittleEndian.PutUint32(ackFrame[0:4], ackPayloadSize)
+	binary.LittleEndian.PutUint32(ackFrame[4:8], 30)
+	binary.LittleEndian.PutUint32(ackFrame[8:12], 0)
+	binary.LittleEndian.PutUint64(ackFrame[12:20], 77)
+	if _, err := gameConn.Write(ackFrame); err != nil {
+		t.Fatal("write ack:", err)
+	}
+
+	// Verify perception on PerceptionCh
+	select {
+	case p := <-client.PerceptionCh:
+		if string(p) != string(percJSON) {
+			t.Errorf("perception = %q, want %q", string(p), string(percJSON))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for perception")
+	}
+
+	// Verify chat_received on ChatCh
+	select {
+	case cr := <-client.ChatCh:
+		if cr.SenderPersistID != 5 {
+			t.Errorf("SenderPersistID = %d, want 5", cr.SenderPersistID)
+		}
+		if cr.Text != "Hey!" {
+			t.Errorf("Text = %q, want Hey!", cr.Text)
+		}
+		if len(cr.RecipientPersistIDs) != 1 || cr.RecipientPersistIDs[0] != 1 {
+			t.Errorf("RecipientPersistIDs = %v, want [1]", cr.RecipientPersistIDs)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for chat_received event")
+	}
+
+	// Verify tick ack on AckCh
+	select {
+	case ack := <-client.AckCh:
+		if ack.TickID != 30 {
+			t.Errorf("TickID = %d, want 30", ack.TickID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for ack")
+	}
+}
+
+// TestChatReceivedEmptyRecipients verifies that a chat_received event with an
+// empty recipient_persist_ids array is correctly dispatched (sender spoke but
+// no one was within earshot).
+func TestChatReceivedEmptyRecipients(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "chat-empty.sock")
+
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		accepted <- conn
+	}()
+
+	client := NewClient(sockPath)
+	defer client.Close()
+
+	go func() { _ = client.Connect() }()
+
+	var gameConn net.Conn
+	select {
+	case gameConn = <-accepted:
+		defer gameConn.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for client connect")
+	}
+
+	sendFrame := func(payload []byte) {
+		t.Helper()
+		frame := make([]byte, 4+len(payload))
+		binary.LittleEndian.PutUint32(frame[0:4], uint32(len(payload)))
+		copy(frame[4:], payload)
+		if _, err := gameConn.Write(frame); err != nil {
+			t.Fatalf("write frame: %v", err)
+		}
+	}
+
+	chatJSON := []byte(`{"type":"chat_received","sender_persist_id":99,"sender_name":"Loner","text":"Echo...","recipient_persist_ids":[]}`)
+	sendFrame(chatJSON)
+
+	select {
+	case cr := <-client.ChatCh:
+		if cr.SenderPersistID != 99 {
+			t.Errorf("SenderPersistID = %d, want 99", cr.SenderPersistID)
+		}
+		if len(cr.RecipientPersistIDs) != 0 {
+			t.Errorf("RecipientPersistIDs = %v, want []", cr.RecipientPersistIDs)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for chat_received event on ChatCh")
+	}
+}
+
 // Ensure temp socket cleanup
 func TestMain(m *testing.M) {
 	os.Exit(m.Run())

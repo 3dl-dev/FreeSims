@@ -15,8 +15,11 @@
   <!-- Include the real SimSaveStore source file for real-integration tests of
        path safety rules (reeims-eb9). The file is pure (no MonoGame deps) so
        it compiles cleanly into the test assembly. -->
+  <!-- Include LooksLikeSynthesizer (pure, no MonoGame deps) for unit tests of
+       the looks_like synthesis algorithm (reeims-5e3). -->
   <ItemGroup>
     <Compile Include="..\SimsVille\SimsAntics\Diagnostics\SimSaveStore.cs" LinkBase="IncludedFromSimsVille" />
+    <Compile Include="..\SimsVille\SimsAntics\Diagnostics\LooksLikeSynthesizer.cs" LinkBase="IncludedFromSimsVille" />
   </ItemGroup>
 
   <ItemGroup>

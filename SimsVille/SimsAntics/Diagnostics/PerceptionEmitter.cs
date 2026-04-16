@@ -76,6 +76,11 @@ namespace FSO.SimAntics.Diagnostics
 
         private static object BuildPerception(VM vm, VMAvatar avatar)
         {
+            // Read godMode on each call so tests can toggle FREESIMS_GOD_MODE between calls.
+            bool godMode = string.Equals(
+                Environment.GetEnvironmentVariable("FREESIMS_GOD_MODE"), "1",
+                StringComparison.Ordinal);
+
             var relationships = BuildRelationships(vm, avatar);
             // Nearby objects with their available interactions (pie menus)
             var nearbyObjects = new List<object>();
@@ -108,28 +113,56 @@ namespace FSO.SimAntics.Diagnostics
 
             var clock = vm.Context.Clock;
 
-            // Other avatars on the lot, excluding self (reeims-d37)
-            var lotAvatars = vm.Entities
-                .OfType<VMAvatar>()
-                .Where(a => a.PersistID != avatar.PersistID)
-                .Select(a => new
-                {
-                    persist_id = a.PersistID,
-                    name = a.ToString(),
-                    position = new { x = (int)a.Position.x, y = (int)a.Position.y, level = (int)a.Position.Level },
-                    current_animation = a.CurrentAnimationState?.Anim?.Name ?? "",
-                    motives = new
+            // Other avatars on the lot, excluding self (reeims-d37).
+            // godMode=1: emit raw motives (current behaviour).
+            // godMode unset: emit looks_like synthesis; motives zeroed/omitted (reeims-5e3).
+            IEnumerable<object> lotAvatarSeq;
+            if (godMode)
+            {
+                lotAvatarSeq = vm.Entities
+                    .OfType<VMAvatar>()
+                    .Where(a => a.PersistID != avatar.PersistID)
+                    .Select(a => (object)new
                     {
-                        hunger = a.GetMotiveData(VMMotive.Hunger),
-                        comfort = a.GetMotiveData(VMMotive.Comfort),
-                        energy = a.GetMotiveData(VMMotive.Energy),
-                        hygiene = a.GetMotiveData(VMMotive.Hygiene),
-                        bladder = a.GetMotiveData(VMMotive.Bladder),
-                        social = a.GetMotiveData(VMMotive.Social),
-                        fun = a.GetMotiveData(VMMotive.Fun),
-                        mood = a.GetMotiveData(VMMotive.Mood),
-                    },
-                }).ToList();
+                        persist_id = a.PersistID,
+                        name = a.ToString(),
+                        position = new { x = (int)a.Position.x, y = (int)a.Position.y, level = (int)a.Position.Level },
+                        current_animation = a.CurrentAnimationState?.Anim?.Name ?? "",
+                        motives = new
+                        {
+                            hunger = a.GetMotiveData(VMMotive.Hunger),
+                            comfort = a.GetMotiveData(VMMotive.Comfort),
+                            energy = a.GetMotiveData(VMMotive.Energy),
+                            hygiene = a.GetMotiveData(VMMotive.Hygiene),
+                            bladder = a.GetMotiveData(VMMotive.Bladder),
+                            social = a.GetMotiveData(VMMotive.Social),
+                            fun = a.GetMotiveData(VMMotive.Fun),
+                            mood = a.GetMotiveData(VMMotive.Mood),
+                        },
+                    });
+            }
+            else
+            {
+                lotAvatarSeq = vm.Entities
+                    .OfType<VMAvatar>()
+                    .Where(a => a.PersistID != avatar.PersistID)
+                    .Select(a => (object)new
+                    {
+                        persist_id = a.PersistID,
+                        name = a.ToString(),
+                        position = new { x = (int)a.Position.x, y = (int)a.Position.y, level = (int)a.Position.Level },
+                        current_animation = a.CurrentAnimationState?.Anim?.Name ?? "",
+                        looks_like = LooksLikeSynthesizer.Synthesize(
+                            a.GetMotiveData(VMMotive.Hunger),
+                            a.GetMotiveData(VMMotive.Energy),
+                            a.GetMotiveData(VMMotive.Bladder),
+                            a.GetMotiveData(VMMotive.Social),
+                            a.GetMotiveData(VMMotive.Hygiene),
+                            a.GetMotiveData(VMMotive.Mood),
+                            a.CurrentAnimationState?.Anim?.Name ?? ""),
+                    });
+            }
+            var lotAvatars = lotAvatarSeq.ToList();
 
             return new
             {

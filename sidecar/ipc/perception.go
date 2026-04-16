@@ -123,12 +123,17 @@ type LotAvatarMotives struct {
 
 // LotAvatar describes another Sim present on the lot (reeims-d37).
 // Self (the Sim whose perception is being emitted) is excluded by persist_id.
+//
+// godMode shape (FREESIMS_GOD_MODE=1): Motives is populated; LooksLike is empty.
+// Embodied shape (default): LooksLike is a ≤60-char synthesized description of the
+// other Sim's observable state; Motives is zero-valued (reeims-5e3).
 type LotAvatar struct {
 	PersistID        uint32           `json:"persist_id"`
 	Name             string           `json:"name"`
 	Position         Position         `json:"position"`
 	CurrentAnimation string           `json:"current_animation"`
 	Motives          LotAvatarMotives `json:"motives"`
+	LooksLike        string           `json:"looks_like,omitempty"`
 }
 
 // Relationship describes the controlled Sim's relationship to another avatar (reeims-2eb).
