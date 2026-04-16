@@ -748,6 +748,190 @@ func TestDialogEvent_JSONRoundTrip_ThreeButtons(t *testing.T) {
 	}
 }
 
+// ── Self-exclusion filter tests (reeims-221) ──────────────────────────────────
+//
+// Regression tests for filterSelfFromPerception. The bug: when the C# engine
+// emits a perception for Gerry (persist_id=28), Gerry's own VMAvatar entity
+// holds a different PersistID (701474255) at LINQ query time, so the C# filter
+// (a.PersistID != 28) passes the entity through. Both lot_avatars entries
+// (Daisy and Gerry) carry PersistID=701474255 in the demo log. The Go sidecar
+// fix strips any lot_avatars entry whose persist_id equals the perception's own
+// persist_id before forwarding to agents.
+
+func TestFilterSelfFromPerception_RemovesSelf(t *testing.T) {
+	// Reproduce the exact failure observed in /tmp/demo-events.jsonl:
+	// Gerry's perception (persist_id=28) contains two lot_avatars both with
+	// persist_id=701474255; one of them is named "Gerry".
+	// After the fix, only the non-self entry (Daisy) should survive.
+	raw := []byte(`{
+		"type": "perception",
+		"persist_id": 28,
+		"sim_id": 1,
+		"name": "Gerry",
+		"funds": 5000,
+		"clock": {"hours":12,"minutes":0,"seconds":0,"time_of_day":2,"day":1},
+		"motives": {"hunger":0,"comfort":0,"energy":0,"hygiene":0,"bladder":0,"room":0,"social":0,"fun":0,"mood":0},
+		"position": {"x":8,"y":8,"level":1},
+		"rotation": 0.0,
+		"current_animation": "idle",
+		"action_queue": [],
+		"nearby_objects": [],
+		"lot_avatars": [
+			{"persist_id": 28, "name": "Gerry", "position": {"x":8,"y":8,"level":1}, "current_animation": "idle",
+			 "motives": {"hunger":0,"comfort":0,"energy":0,"hygiene":0,"bladder":0,"social":0,"fun":0,"mood":0}},
+			{"persist_id": 701474255, "name": "Daisy", "position": {"x":5,"y":5,"level":1}, "current_animation": "walk",
+			 "motives": {"hunger":10,"comfort":20,"energy":30,"hygiene":40,"bladder":50,"social":60,"fun":70,"mood":80}}
+		],
+		"skills": {"cooking":0,"charisma":0,"mechanical":0,"creativity":0,"body":0,"logic":0},
+		"job": {"has_job":false,"career":null,"level":0,"salary":0,"work_hours":null},
+		"relationships": []
+	}`)
+
+	cleaned := filterSelfFromPerception(raw)
+
+	var p Perception
+	if err := json.Unmarshal(cleaned, &p); err != nil {
+		t.Fatalf("unmarshal cleaned: %v", err)
+	}
+
+	if len(p.LotAvatars) != 1 {
+		t.Fatalf("expected 1 lot_avatar after self-exclusion, got %d: %v",
+			len(p.LotAvatars), namesOf(p.LotAvatars))
+	}
+	if p.LotAvatars[0].Name != "Daisy" {
+		t.Errorf("expected remaining lot_avatar to be Daisy, got %q", p.LotAvatars[0].Name)
+	}
+	if p.LotAvatars[0].PersistID != 701474255 {
+		t.Errorf("expected remaining lot_avatar persist_id=701474255, got %d", p.LotAvatars[0].PersistID)
+	}
+}
+
+func TestFilterSelfFromPerception_NoSelfPresent(t *testing.T) {
+	// When the perception has no self-entry in lot_avatars, the output should
+	// be byte-for-byte identical to the input (fast path: no re-encoding).
+	raw := []byte(`{
+		"type": "perception",
+		"persist_id": 28,
+		"sim_id": 1,
+		"name": "Gerry",
+		"funds": 5000,
+		"clock": {"hours":12,"minutes":0,"seconds":0,"time_of_day":2,"day":1},
+		"motives": {"hunger":0,"comfort":0,"energy":0,"hygiene":0,"bladder":0,"room":0,"social":0,"fun":0,"mood":0},
+		"position": {"x":8,"y":8,"level":1},
+		"rotation": 0.0,
+		"current_animation": "idle",
+		"action_queue": [],
+		"nearby_objects": [],
+		"lot_avatars": [
+			{"persist_id": 701474255, "name": "Daisy", "position": {"x":5,"y":5,"level":1}, "current_animation": "walk",
+			 "motives": {"hunger":0,"comfort":0,"energy":0,"hygiene":0,"bladder":0,"social":0,"fun":0,"mood":0}}
+		],
+		"skills": {"cooking":0,"charisma":0,"mechanical":0,"creativity":0,"body":0,"logic":0},
+		"job": {"has_job":false,"career":null,"level":0,"salary":0,"work_hours":null},
+		"relationships": []
+	}`)
+
+	cleaned := filterSelfFromPerception(raw)
+
+	// Fast path: returns the original slice header (same bytes).
+	if string(cleaned) != string(raw) {
+		t.Errorf("expected cleaned to be identical to raw when no self present; got different bytes")
+	}
+}
+
+func TestFilterSelfFromPerception_EmptyLotAvatars(t *testing.T) {
+	// Edge case: empty lot_avatars — should pass through unchanged.
+	raw := []byte(`{
+		"type": "perception",
+		"persist_id": 28,
+		"sim_id": 1,
+		"name": "Gerry",
+		"funds": 0,
+		"clock": {"hours":0,"minutes":0,"seconds":0,"time_of_day":0,"day":0},
+		"motives": {"hunger":0,"comfort":0,"energy":0,"hygiene":0,"bladder":0,"room":0,"social":0,"fun":0,"mood":0},
+		"position": {"x":0,"y":0,"level":1},
+		"rotation": 0.0,
+		"current_animation": "",
+		"action_queue": [],
+		"nearby_objects": [],
+		"lot_avatars": [],
+		"skills": {"cooking":0,"charisma":0,"mechanical":0,"creativity":0,"body":0,"logic":0},
+		"job": {"has_job":false,"career":null,"level":0,"salary":0,"work_hours":null},
+		"relationships": []
+	}`)
+
+	cleaned := filterSelfFromPerception(raw)
+
+	var p Perception
+	if err := json.Unmarshal(cleaned, &p); err != nil {
+		t.Fatalf("unmarshal cleaned: %v", err)
+	}
+	if len(p.LotAvatars) != 0 {
+		t.Errorf("expected 0 lot_avatars, got %d", len(p.LotAvatars))
+	}
+}
+
+func TestFilterSelfFromPerception_MultipleSelfEntries(t *testing.T) {
+	// Paranoid case: multiple entries with the self persist_id — all should be removed.
+	raw := []byte(`{
+		"type": "perception",
+		"persist_id": 42,
+		"sim_id": 1,
+		"name": "TestSim",
+		"funds": 0,
+		"clock": {"hours":0,"minutes":0,"seconds":0,"time_of_day":0,"day":0},
+		"motives": {"hunger":0,"comfort":0,"energy":0,"hygiene":0,"bladder":0,"room":0,"social":0,"fun":0,"mood":0},
+		"position": {"x":0,"y":0,"level":1},
+		"rotation": 0.0,
+		"current_animation": "",
+		"action_queue": [],
+		"nearby_objects": [],
+		"lot_avatars": [
+			{"persist_id": 42, "name": "Self-A", "position": {"x":1,"y":1,"level":1}, "current_animation": "",
+			 "motives": {"hunger":0,"comfort":0,"energy":0,"hygiene":0,"bladder":0,"social":0,"fun":0,"mood":0}},
+			{"persist_id": 99, "name": "Other",  "position": {"x":2,"y":2,"level":1}, "current_animation": "",
+			 "motives": {"hunger":0,"comfort":0,"energy":0,"hygiene":0,"bladder":0,"social":0,"fun":0,"mood":0}},
+			{"persist_id": 42, "name": "Self-B", "position": {"x":3,"y":3,"level":1}, "current_animation": "",
+			 "motives": {"hunger":0,"comfort":0,"energy":0,"hygiene":0,"bladder":0,"social":0,"fun":0,"mood":0}}
+		],
+		"skills": {"cooking":0,"charisma":0,"mechanical":0,"creativity":0,"body":0,"logic":0},
+		"job": {"has_job":false,"career":null,"level":0,"salary":0,"work_hours":null},
+		"relationships": []
+	}`)
+
+	cleaned := filterSelfFromPerception(raw)
+
+	var p Perception
+	if err := json.Unmarshal(cleaned, &p); err != nil {
+		t.Fatalf("unmarshal cleaned: %v", err)
+	}
+	if len(p.LotAvatars) != 1 {
+		t.Fatalf("expected 1 lot_avatar after removing both self entries, got %d: %v",
+			len(p.LotAvatars), namesOf(p.LotAvatars))
+	}
+	if p.LotAvatars[0].Name != "Other" {
+		t.Errorf("expected remaining lot_avatar='Other', got %q", p.LotAvatars[0].Name)
+	}
+}
+
+func TestFilterSelfFromPerception_InvalidJSON(t *testing.T) {
+	// On malformed JSON, the function must return the original payload unchanged.
+	raw := []byte(`not valid json`)
+	cleaned := filterSelfFromPerception(raw)
+	if string(cleaned) != string(raw) {
+		t.Errorf("expected original payload on parse error, got different bytes")
+	}
+}
+
+// namesOf is a test helper to produce a readable list of lot_avatar names.
+func namesOf(avatars []LotAvatar) []string {
+	out := make([]string, len(avatars))
+	for i, a := range avatars {
+		out[i] = a.Name
+	}
+	return out
+}
+
 func TestDialogEvent_MarshalRoundTrip(t *testing.T) {
 	// Verify marshal → unmarshal preserves all fields.
 	original := DialogEvent{
