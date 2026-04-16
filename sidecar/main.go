@@ -88,6 +88,18 @@ type jsonCommand struct {
 	DialogID     uint32 `json:"dialog_id,omitempty"`
 	Button       string `json:"button,omitempty"`        // "Yes", "No", "Cancel", or custom label
 	ResponseText string `json:"response_text,omitempty"` // free-text response (text-input dialogs)
+
+	// Save/load-sim fields (reeims-eb9)
+	Filename string `json:"filename,omitempty"`
+	// SpawnAt is the spawn location for load-sim. If unset, load-sim uses (x,y,level).
+	SpawnAt *spawnAt `json:"spawn_at,omitempty"`
+}
+
+// spawnAt is the nested object shape for load-sim's spawn coordinates.
+type spawnAt struct {
+	X     int16 `json:"x"`
+	Y     int16 `json:"y"`
+	Level byte  `json:"level"`
 }
 
 // jsonArchOp mirrors ipc.ArchOp for JSON decoding.
@@ -472,6 +484,51 @@ func parseCommand(jcmd jsonCommand) (ipc.Command, error) {
 			X:         jcmd.X,
 			Y:         jcmd.Y,
 			Level:     byte(level),
+		}, nil
+
+	case "save-sim":
+		// Saves the target Sim's full marshalled state to a file under Content/Saves/.
+		// Requires request_id to receive the response. actor_uid is the PersistID of
+		// the Sim to save; filename is relative to Content/Saves/ and must not contain
+		// path separators, "..", a leading "/", or "~".
+		if jcmd.Filename == "" {
+			return nil, fmt.Errorf("save-sim command requires non-empty 'filename'")
+		}
+		return &ipc.SaveSimCmd{
+			ActorUID:  jcmd.ActorUID,
+			RequestID: jcmd.RequestID,
+			Filename:  jcmd.Filename,
+		}, nil
+
+	case "load-sim":
+		// Loads a previously-saved Sim from Content/Saves/ and spawns it at spawn_at.
+		// If spawn_at is absent, falls back to (x, y, level). Level defaults to 1.
+		// actor_uid is ignored (the loaded Sim gets a new PersistID).
+		if jcmd.Filename == "" {
+			return nil, fmt.Errorf("load-sim command requires non-empty 'filename'")
+		}
+		var sx, sy int16
+		var slevel byte = 1
+		if jcmd.SpawnAt != nil {
+			sx = jcmd.SpawnAt.X
+			sy = jcmd.SpawnAt.Y
+			if jcmd.SpawnAt.Level != 0 {
+				slevel = jcmd.SpawnAt.Level
+			}
+		} else {
+			sx = jcmd.X
+			sy = jcmd.Y
+			if jcmd.Level != 0 {
+				slevel = byte(jcmd.Level)
+			}
+		}
+		return &ipc.LoadSimCmd{
+			ActorUID:  jcmd.ActorUID,
+			RequestID: jcmd.RequestID,
+			Filename:  jcmd.Filename,
+			X:         sx,
+			Y:         sy,
+			Level:     slevel,
 		}, nil
 
 	case "dialog-response":

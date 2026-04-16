@@ -38,6 +38,8 @@ const (
 	CmdQueryWallAt       VMCommandType = 40
 	CmdQueryFloorAt      VMCommandType = 41
 	CmdQueryTilePathable VMCommandType = 42
+	CmdSaveSim           VMCommandType = 43
+	CmdLoadSim           VMCommandType = 44
 )
 
 // ArchCommandType mirrors the C# VMArchitectureCommandType enum (byte).
@@ -824,6 +826,103 @@ func (c *QueryTilePathableCmd) Serialize(buf *bytes.Buffer) error {
 		buf.WriteByte(1)
 		writeBinaryString(buf, c.RequestID)
 	}
+
+	b := make([]byte, 5)
+	binary.LittleEndian.PutUint16(b[0:2], uint16(c.X))
+	binary.LittleEndian.PutUint16(b[2:4], uint16(c.Y))
+	b[4] = c.Level
+	buf.Write(b)
+	return nil
+}
+
+// --- SaveSim command (reeims-eb9) ---
+//
+// SaveSimCmd writes a Sim's full marshalled state (VMAvatarMarshal) to a file
+// anchored under Content/Saves/. The game engine resolves the filename against
+// the saves base dir and rejects path-traversal attempts.
+//
+// Wire format (after VMCommandType byte = 43):
+//
+//	[ActorUID: 4 bytes LE]        — PersistID of the Sim to save
+//	[hasRequestID: byte]          — 0 or 1
+//	[if 1: 7-bit-length-prefixed UTF-8 requestID]
+//	[filename: 7-bit-length-prefixed UTF-8 string]
+//
+// Response payload (JSON):
+//
+//	{"type":"response","request_id":"...","status":"ok",
+//	 "payload":{"status":"ok","filename":"<path>","bytes_written":N}}
+//	or
+//	{"type":"response","request_id":"...","status":"error",
+//	 "payload":{"status":"error","error":"<short_key>"}}
+type SaveSimCmd struct {
+	ActorUID  uint32
+	RequestID string
+	Filename  string
+}
+
+func (c *SaveSimCmd) CmdType() VMCommandType { return CmdSaveSim }
+
+func (c *SaveSimCmd) Serialize(buf *bytes.Buffer) error {
+	writeActorUID(buf, c.ActorUID)
+
+	// RequestID BEFORE filename per spec wire format.
+	if c.RequestID == "" {
+		buf.WriteByte(0)
+	} else {
+		buf.WriteByte(1)
+		writeBinaryString(buf, c.RequestID)
+	}
+	writeBinaryString(buf, c.Filename)
+	return nil
+}
+
+// --- LoadSim command (reeims-eb9) ---
+//
+// LoadSimCmd reads a previously-saved Sim marshal from Content/Saves/ and
+// spawns the Sim on the current lot at spawn_at coordinates. If the requested
+// tile is occupied, the loader tries the 4 cardinal neighbours (+x,-x,+y,-y);
+// if all fail, responds with {error:"no_free_tile"}.
+//
+// Wire format (after VMCommandType byte = 44):
+//
+//	[ActorUID: 4 bytes LE]        — ignored on load (always 0 from agent)
+//	[hasRequestID: byte]          — 0 or 1
+//	[if 1: 7-bit-length-prefixed UTF-8 requestID]
+//	[filename: 7-bit-length-prefixed UTF-8 string]
+//	[x: int16 LE]                 — spawn_at tile x (0-based big-tile coord)
+//	[y: int16 LE]                 — spawn_at tile y (0-based big-tile coord)
+//	[level: byte]                 — floor level (1-based; 1 = ground)
+//
+// Response payload (JSON):
+//
+//	{"type":"response","request_id":"...","status":"ok",
+//	 "payload":{"status":"ok","new_persist_id":N,
+//	            "position":{"x":X,"y":Y,"level":L}}}
+//	or
+//	{"type":"response","request_id":"...","status":"error",
+//	 "payload":{"status":"error","error":"<short_key>"}}
+type LoadSimCmd struct {
+	ActorUID  uint32
+	RequestID string
+	Filename  string
+	X         int16
+	Y         int16
+	Level     byte
+}
+
+func (c *LoadSimCmd) CmdType() VMCommandType { return CmdLoadSim }
+
+func (c *LoadSimCmd) Serialize(buf *bytes.Buffer) error {
+	writeActorUID(buf, c.ActorUID)
+
+	if c.RequestID == "" {
+		buf.WriteByte(0)
+	} else {
+		buf.WriteByte(1)
+		writeBinaryString(buf, c.RequestID)
+	}
+	writeBinaryString(buf, c.Filename)
 
 	b := make([]byte, 5)
 	binary.LittleEndian.PutUint16(b[0:2], uint16(c.X))

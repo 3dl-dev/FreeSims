@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -1469,6 +1470,254 @@ func TestQueryWallAtRoundTrip(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for response on ResponseCh")
+	}
+}
+
+// TestSaveSimRoundTrip (reeims-eb9) — save-sim command round-trip:
+//  1. Client sends SaveSimCmd with request_id + filename.
+//  2. Fake-game verifies the byte layout on the wire.
+//  3. Fake-game emits the "ok" response with filename+bytes_written payload.
+//  4. Client receives the response on ResponseCh with correct RequestID/Status.
+func TestSaveSimRoundTrip(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "savesim.sock")
+
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		accepted <- conn
+	}()
+
+	client := NewClient(sockPath)
+	defer client.Close()
+
+	go func() { _ = client.Connect() }()
+
+	var gameConn net.Conn
+	select {
+	case gameConn = <-accepted:
+		defer gameConn.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for client connect")
+	}
+	waitConnected(t, client)
+
+	const reqID = "ss1"
+	const filename = "daisy.sav"
+	cmd := &SaveSimCmd{ActorUID: 77, Filename: filename, RequestID: reqID}
+	payload, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal("serialize:", err)
+	}
+	if err := client.SendFrame(payload); err != nil {
+		t.Fatal("send:", err)
+	}
+
+	gameConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var lenBuf [4]byte
+	if _, err := readFull(gameConn, lenBuf[:]); err != nil {
+		t.Fatal("read frame length:", err)
+	}
+	frameLen := binary.LittleEndian.Uint32(lenBuf[:])
+	frameBuf := make([]byte, frameLen)
+	if _, err := readFull(gameConn, frameBuf); err != nil {
+		t.Fatal("read frame payload:", err)
+	}
+
+	// Wire: [type=43][uid=77 LE][hasReq=1][len(3)+"ss1"][len(9)+"daisy.sav"]
+	if frameBuf[0] != byte(CmdSaveSim) {
+		t.Fatalf("type byte = %d, want %d (CmdSaveSim=43)", frameBuf[0], CmdSaveSim)
+	}
+	if binary.LittleEndian.Uint32(frameBuf[1:5]) != 77 {
+		t.Errorf("ActorUID = %d, want 77", binary.LittleEndian.Uint32(frameBuf[1:5]))
+	}
+	if frameBuf[5] != 1 {
+		t.Errorf("hasRequestID = %d, want 1", frameBuf[5])
+	}
+	if frameBuf[6] != 3 {
+		t.Errorf("requestID length = %d, want 3", frameBuf[6])
+	}
+	if string(frameBuf[7:10]) != reqID {
+		t.Errorf("requestID = %q, want %q", string(frameBuf[7:10]), reqID)
+	}
+	if frameBuf[10] != 9 {
+		t.Errorf("filename length = %d, want 9", frameBuf[10])
+	}
+	if string(frameBuf[11:20]) != filename {
+		t.Errorf("filename = %q, want %q", string(frameBuf[11:20]), filename)
+	}
+
+	// Simulate the game emitting a success response.
+	respJSON := `{"type":"response","request_id":"ss1","status":"ok","payload":{"status":"ok","filename":"Content/Saves/daisy.sav","bytes_written":1234}}`
+	respFrame := make([]byte, 4+len(respJSON))
+	binary.LittleEndian.PutUint32(respFrame[0:4], uint32(len(respJSON)))
+	copy(respFrame[4:], respJSON)
+	if _, err := gameConn.Write(respFrame); err != nil {
+		t.Fatal("write response frame:", err)
+	}
+
+	select {
+	case rf := <-client.ResponseCh:
+		if rf.RequestID != reqID {
+			t.Errorf("ResponseFrame.RequestID = %q, want %q", rf.RequestID, reqID)
+		}
+		if rf.Status != "ok" {
+			t.Errorf("ResponseFrame.Status = %q, want ok", rf.Status)
+		}
+		var payloadMap map[string]interface{}
+		if err := json.Unmarshal(rf.Payload, &payloadMap); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		// payload.filename should end with the saved filename.
+		gotFilename, _ := payloadMap["filename"].(string)
+		if !strings.Contains(gotFilename, filename) {
+			t.Errorf("payload.filename = %q, want to contain %q", gotFilename, filename)
+		}
+		// bytes_written must be a number.
+		if _, ok := payloadMap["bytes_written"]; !ok {
+			t.Errorf("payload missing bytes_written")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for save-sim response on ResponseCh")
+	}
+}
+
+// TestLoadSimRoundTrip (reeims-eb9) — load-sim command round-trip:
+//  1. Client sends LoadSimCmd with request_id, filename, spawn_at.
+//  2. Fake-game verifies the byte layout on the wire.
+//  3. Fake-game emits an "ok" response with new_persist_id+position.
+//  4. Client receives the response on ResponseCh with correct fields.
+func TestLoadSimRoundTrip(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "loadsim.sock")
+
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		accepted <- conn
+	}()
+
+	client := NewClient(sockPath)
+	defer client.Close()
+
+	go func() { _ = client.Connect() }()
+
+	var gameConn net.Conn
+	select {
+	case gameConn = <-accepted:
+		defer gameConn.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for client connect")
+	}
+	waitConnected(t, client)
+
+	const reqID = "ls1"
+	const filename = "daisy.sav"
+	cmd := &LoadSimCmd{ActorUID: 0, Filename: filename, X: 8, Y: 12, Level: 1, RequestID: reqID}
+	payload, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal("serialize:", err)
+	}
+	if err := client.SendFrame(payload); err != nil {
+		t.Fatal("send:", err)
+	}
+
+	gameConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var lenBuf [4]byte
+	if _, err := readFull(gameConn, lenBuf[:]); err != nil {
+		t.Fatal("read frame length:", err)
+	}
+	frameLen := binary.LittleEndian.Uint32(lenBuf[:])
+	frameBuf := make([]byte, frameLen)
+	if _, err := readFull(gameConn, frameBuf); err != nil {
+		t.Fatal("read frame payload:", err)
+	}
+
+	// Wire: [type=44][uid=0 LE][hasReq=1][len(3)+"ls1"][len(9)+"daisy.sav"][x=8 LE][y=12 LE][level=1]
+	if frameBuf[0] != byte(CmdLoadSim) {
+		t.Fatalf("type byte = %d, want %d (CmdLoadSim=44)", frameBuf[0], CmdLoadSim)
+	}
+	if binary.LittleEndian.Uint32(frameBuf[1:5]) != 0 {
+		t.Errorf("ActorUID = %d, want 0", binary.LittleEndian.Uint32(frameBuf[1:5]))
+	}
+	if frameBuf[5] != 1 {
+		t.Errorf("hasRequestID = %d, want 1", frameBuf[5])
+	}
+	if frameBuf[6] != 3 {
+		t.Errorf("requestID length = %d, want 3", frameBuf[6])
+	}
+	if string(frameBuf[7:10]) != reqID {
+		t.Errorf("requestID = %q, want %q", string(frameBuf[7:10]), reqID)
+	}
+	if frameBuf[10] != 9 {
+		t.Errorf("filename length = %d, want 9", frameBuf[10])
+	}
+	if string(frameBuf[11:20]) != filename {
+		t.Errorf("filename = %q, want %q", string(frameBuf[11:20]), filename)
+	}
+	if int16(binary.LittleEndian.Uint16(frameBuf[20:22])) != 8 {
+		t.Errorf("x at offset 20 = %d, want 8", int16(binary.LittleEndian.Uint16(frameBuf[20:22])))
+	}
+	if int16(binary.LittleEndian.Uint16(frameBuf[22:24])) != 12 {
+		t.Errorf("y at offset 22 = %d, want 12", int16(binary.LittleEndian.Uint16(frameBuf[22:24])))
+	}
+	if frameBuf[24] != 1 {
+		t.Errorf("level at offset 24 = %d, want 1", frameBuf[24])
+	}
+
+	// Simulate the game emitting a success response.
+	respJSON := `{"type":"response","request_id":"ls1","status":"ok","payload":{"status":"ok","new_persist_id":999,"position":{"x":8,"y":12,"level":1}}}`
+	respFrame := make([]byte, 4+len(respJSON))
+	binary.LittleEndian.PutUint32(respFrame[0:4], uint32(len(respJSON)))
+	copy(respFrame[4:], respJSON)
+	if _, err := gameConn.Write(respFrame); err != nil {
+		t.Fatal("write response frame:", err)
+	}
+
+	select {
+	case rf := <-client.ResponseCh:
+		if rf.RequestID != reqID {
+			t.Errorf("ResponseFrame.RequestID = %q, want %q", rf.RequestID, reqID)
+		}
+		if rf.Status != "ok" {
+			t.Errorf("ResponseFrame.Status = %q, want ok", rf.Status)
+		}
+		var payloadMap map[string]interface{}
+		if err := json.Unmarshal(rf.Payload, &payloadMap); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		newPid, _ := payloadMap["new_persist_id"].(float64)
+		if newPid != 999 {
+			t.Errorf("payload.new_persist_id = %v, want 999", newPid)
+		}
+		pos, _ := payloadMap["position"].(map[string]interface{})
+		if pos == nil {
+			t.Fatal("payload.position missing")
+		}
+		if posX, _ := pos["x"].(float64); posX != 8 {
+			t.Errorf("position.x = %v, want 8", posX)
+		}
+		if posY, _ := pos["y"].(float64); posY != 12 {
+			t.Errorf("position.y = %v, want 12", posY)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for load-sim response on ResponseCh")
 	}
 }
 
