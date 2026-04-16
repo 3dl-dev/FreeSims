@@ -73,6 +73,9 @@ type jsonCommand struct {
 
 	// LoadLot fields
 	HouseXml string `json:"house_xml,omitempty"`
+
+	// QuerySimState fields
+	SimPersistID uint32 `json:"sim_persist_id,omitempty"`
 }
 
 // jsonArchOp mirrors ipc.ArchOp for JSON decoding.
@@ -351,6 +354,16 @@ func parseCommand(jcmd jsonCommand) (ipc.Command, error) {
 			ActorUID:  jcmd.ActorUID,
 			HouseXml:  jcmd.HouseXml,
 			RequestID: jcmd.RequestID,
+		}, nil
+
+	case "query-sim-state":
+		if jcmd.SimPersistID == 0 {
+			return nil, fmt.Errorf("query-sim-state command requires non-zero 'sim_persist_id'")
+		}
+		return &ipc.QuerySimStateCmd{
+			ActorUID:     jcmd.ActorUID,
+			RequestID:    jcmd.RequestID,
+			SimPersistID: jcmd.SimPersistID,
 		}, nil
 
 	default:
