@@ -2,11 +2,20 @@
   "convention": "freesims",
   "version": "1.0",
   "operation": "query-lot-state",
-  "description": "Query all objects and Sims on the current lot",
+  "description": "Look around and take stock of everything on this lot.",
   "args": [],
-  "produces_tags": [{"tag": "freesims:query-lot-state", "cardinality": "exactly_one"}],
+  "produces_tags": [
+    {
+      "tag": "freesims:query-lot-state",
+      "cardinality": "exactly_one"
+    }
+  ],
   "antecedents": "none",
   "signing": "member_key",
-  "rate_limit": {"max": 10, "per": "sender", "window": "1m"},
+  "rate_limit": {
+    "max": 10,
+    "per": "sender",
+    "window": "1m"
+  },
   "response": "sync"
 }

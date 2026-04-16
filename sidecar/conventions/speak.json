@@ -2,14 +2,34 @@
   "convention": "freesims",
   "version": "1.0",
   "operation": "speak",
-  "description": "Say something aloud. Other Sims within earshot will receive it as a chat_received event in their next perception.",
+  "description": "Say something. Anyone nearby will hear you.",
   "args": [
-    {"name": "sim_id", "type": "integer", "required": true, "description": "PersistID of the speaking Sim (your own persist_id)"},
-    {"name": "text", "type": "string", "required": true, "maxLength": 200, "description": "What to say (≤200 chars)"}
+    {
+      "name": "sim_id",
+      "type": "integer",
+      "required": true,
+      "description": "PersistID of the speaking Sim (your own persist_id)"
+    },
+    {
+      "name": "text",
+      "type": "string",
+      "required": true,
+      "maxLength": 200,
+      "description": "What to say (\u2264200 chars)"
+    }
   ],
-  "produces_tags": [{"tag": "freesims:speak", "cardinality": "exactly_one"}],
+  "produces_tags": [
+    {
+      "tag": "freesims:speak",
+      "cardinality": "exactly_one"
+    }
+  ],
   "antecedents": "none",
   "signing": "member_key",
-  "rate_limit": {"max": 20, "per": "sender", "window": "1m"},
+  "rate_limit": {
+    "max": 20,
+    "per": "sender",
+    "window": "1m"
+  },
   "response": "sync"
 }

@@ -2,14 +2,34 @@
   "convention": "freesims",
   "version": "1.0",
   "operation": "save-sim",
-  "description": "Save your current state (motives, skills, relationships, inventory) to a file. You can be restored later with load-sim.",
+  "description": "Settle in for the night \u2014 save everything about who you are right now so you can pick up where you left off.",
   "args": [
-    {"name": "sim_id", "type": "integer", "required": true, "description": "PersistID of the Sim to save"},
-    {"name": "filename", "type": "string", "required": true, "maxLength": 64, "description": "Save file name (no path separators, stored under Content/Saves/)"}
+    {
+      "name": "sim_id",
+      "type": "integer",
+      "required": true,
+      "description": "PersistID of the Sim to save"
+    },
+    {
+      "name": "filename",
+      "type": "string",
+      "required": true,
+      "maxLength": 64,
+      "description": "Save file name (no path separators, stored under Content/Saves/)"
+    }
   ],
-  "produces_tags": [{"tag": "freesims:save-sim", "cardinality": "exactly_one"}],
+  "produces_tags": [
+    {
+      "tag": "freesims:save-sim",
+      "cardinality": "exactly_one"
+    }
+  ],
   "antecedents": "none",
   "signing": "member_key",
-  "rate_limit": {"max": 5, "per": "sender", "window": "1m"},
+  "rate_limit": {
+    "max": 5,
+    "per": "sender",
+    "window": "1m"
+  },
   "response": "sync"
 }

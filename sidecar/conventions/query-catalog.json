@@ -2,14 +2,33 @@
   "convention": "freesims",
   "version": "1.0",
   "operation": "query-catalog",
-  "description": "Query the object catalog. Returns up to 500 entries with guid, name, price, category, and subcategory.",
+  "description": "Browse what you could buy. Returns names, prices, and categories.",
   "args": [
-    {"name": "category", "type": "string", "required": false, "description": "Category filter: 'all' (default) or a FunctionFlags-derived name (seating, surfaces, appliances, electronics, plumbing, decorative, misc, lighting)"},
-    {"name": "request_id", "type": "string", "required": false, "description": "Optional correlation ID. When set, the response frame carries this ID so the caller can match response to request."}
+    {
+      "name": "category",
+      "type": "string",
+      "required": false,
+      "description": "Category filter: 'all' (default) or a FunctionFlags-derived name (seating, surfaces, appliances, electronics, plumbing, decorative, misc, lighting)"
+    },
+    {
+      "name": "request_id",
+      "type": "string",
+      "required": false,
+      "description": "Optional correlation ID. When set, the response frame carries this ID so the caller can match response to request."
+    }
   ],
-  "produces_tags": [{"tag": "freesims:query-catalog", "cardinality": "exactly_one"}],
+  "produces_tags": [
+    {
+      "tag": "freesims:query-catalog",
+      "cardinality": "exactly_one"
+    }
+  ],
   "antecedents": "none",
   "signing": "member_key",
-  "rate_limit": {"max": 10, "per": "sender", "window": "1m"},
+  "rate_limit": {
+    "max": 10,
+    "per": "sender",
+    "window": "1m"
+  },
   "response": "sync"
 }

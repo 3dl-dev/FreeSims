@@ -2,15 +2,39 @@
   "convention": "freesims",
   "version": "1.0",
   "operation": "interact-with",
-  "description": "Use an object near you. Each object in your perception's nearby_objects carries an interactions list — pick one by id. For example, a Refrigerator might offer {id: 0, name: 'Have a Snack'}. Choose based on what you want to do.",
+  "description": "Do something with a nearby object. Your perception shows what is near you and what each thing offers \u2014 a fridge might let you have a snack, a bed lets you sleep, a mirror lets you practice your speech. Pick the object and the interaction.",
   "args": [
-    {"name": "sim_id", "type": "integer", "required": true, "description": "PersistID of the interacting Sim (your own persist_id)"},
-    {"name": "object_id", "type": "integer", "required": true, "description": "object_id of the target (from nearby_objects)"},
-    {"name": "interaction_id", "type": "integer", "required": true, "description": "Interaction id from the object's interactions list"}
+    {
+      "name": "sim_id",
+      "type": "integer",
+      "required": true,
+      "description": "PersistID of the interacting Sim (your own persist_id)"
+    },
+    {
+      "name": "object_id",
+      "type": "integer",
+      "required": true,
+      "description": "object_id of the target (from nearby_objects)"
+    },
+    {
+      "name": "interaction_id",
+      "type": "integer",
+      "required": true,
+      "description": "Interaction id from the object's interactions list"
+    }
   ],
-  "produces_tags": [{"tag": "freesims:interact-with", "cardinality": "exactly_one"}],
+  "produces_tags": [
+    {
+      "tag": "freesims:interact-with",
+      "cardinality": "exactly_one"
+    }
+  ],
   "antecedents": "none",
   "signing": "member_key",
-  "rate_limit": {"max": 30, "per": "sender", "window": "1m"},
+  "rate_limit": {
+    "max": 30,
+    "per": "sender",
+    "window": "1m"
+  },
   "response": "sync"
 }

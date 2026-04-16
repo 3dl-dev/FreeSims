@@ -104,19 +104,24 @@ def load_conventions(lot_id: str) -> list[dict]:
 
 
 def render_universe_prompt(decls: list[dict], self_name: str, self_id: int) -> str:
-    """Render the convention manifest as the Sim's universe description."""
-    usable_ops = [d for d in decls if d.get("operation") in {"walk-to", "speak", "interact-with"}]
+    """Render the convention manifest as the Sim's lived reality."""
+    # Exclude meta/raw conventions the Sim wouldn't naturally think in terms of
+    skip_ops = {"sim-action", "sim-build", "query-lot-state", "query-pie-menu"}
+    ops = [d for d in decls if d.get("operation") and d["operation"] not in skip_ops]
+
     lines = [
-        f"You are {self_name}.",
-        f"Your persist_id is {self_id}.",
+        f"You are {self_name}. This is your life.",
         "",
-        "Your universe has the following affordances. Each is a convention",
-        "operation you can invoke. The name of each lists required and optional",
-        "arguments. Results come back as fulfillments you will see in your next",
-        "tick. Do not describe what you are going to do — do it.",
+        f"Your body knows itself as persist_id {self_id}.",
+        "",
+        "Each moment, you sense what is around you — where you are, how you",
+        "feel, what objects are nearby, who else is here, and what just happened.",
+        "Your senses arrive as a perception.",
+        "",
+        "You can do the following things:",
         "",
     ]
-    for d in usable_ops:
+    for d in ops:
         op = d["operation"]
         desc = d.get("description", "").strip()
         args = d.get("args") or []
@@ -124,25 +129,29 @@ def render_universe_prompt(decls: list[dict], self_name: str, self_id: int) -> s
         for a in args:
             name = a.get("name")
             if name == "sim_id":
-                continue  # agent fills this automatically
+                continue  # your body handles this
             req = "required" if a.get("required") else "optional"
             arg_strs.append(f"{name} ({a.get('type')}, {req}): {a.get('description','')}")
-        lines.append(f"• {op}: {desc}")
-        for a in arg_strs:
-            lines.append(f"    - {a}")
+        lines.append(f"• {op} — {desc}")
+        if arg_strs:
+            for a in arg_strs:
+                lines.append(f"    {a}")
         lines.append("")
+
     lines.extend([
-        "On each perception tick you will receive a JSON description of your",
-        "current situation: your position, your motives (hunger, energy, etc.),",
-        "nearby objects (each with an `interactions` list), other sims in the",
-        "lot, and recent events.",
+        "Your motives — hunger, comfort, energy, hygiene, bladder, social,",
+        "fun, mood — tell you how you feel. When one drops, you feel it.",
+        "What you do about it is your choice.",
         "",
-        "Respond with exactly one line of JSON with the shape:",
-        '  {"op": "<operation-name>", "args": {...}}',
-        "or, if you choose inaction for this tick:",
+        "Nearby objects show you what interactions they offer. A fridge says",
+        "it can give you a snack. A bed says you can sleep. You already",
+        "understand what these things are — you live here.",
+        "",
+        "When you decide what to do, express it as:",
+        '  {"op": "<what-to-do>", "args": {...}}',
+        "",
+        "If this moment does not call for anything:",
         '  {"op": "wait"}',
-        "",
-        "Do not output prose. Only the JSON.",
     ])
     return "\n".join(lines)
 

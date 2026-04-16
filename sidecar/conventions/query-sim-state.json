@@ -2,13 +2,27 @@
   "convention": "freesims",
   "version": "1.0",
   "operation": "query-sim-state",
-  "description": "Query a Sim's current motives, position, animation, and action queue",
+  "description": "Check on yourself or another Sim \u2014 motives, position, what they are doing.",
   "args": [
-    {"name": "sim_id", "type": "integer", "required": true, "description": "PersistID of the Sim to query"}
+    {
+      "name": "sim_id",
+      "type": "integer",
+      "required": true,
+      "description": "PersistID of the Sim to query"
+    }
   ],
-  "produces_tags": [{"tag": "freesims:query-sim-state", "cardinality": "exactly_one"}],
+  "produces_tags": [
+    {
+      "tag": "freesims:query-sim-state",
+      "cardinality": "exactly_one"
+    }
+  ],
   "antecedents": "none",
   "signing": "member_key",
-  "rate_limit": {"max": 60, "per": "sender", "window": "1m"},
+  "rate_limit": {
+    "max": 60,
+    "per": "sender",
+    "window": "1m"
+  },
   "response": "sync"
 }

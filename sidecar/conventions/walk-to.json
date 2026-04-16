@@ -2,17 +2,52 @@
   "convention": "freesims",
   "version": "1.0",
   "operation": "walk-to",
-  "description": "Walk to a position on the lot. Provide either x/y (tile coordinates × 16) or target_object_id (the object_id from nearby_objects in your perception).",
+  "description": "Go somewhere. Head toward a place or a person.",
   "args": [
-    {"name": "sim_id", "type": "integer", "required": true, "description": "PersistID of the walking Sim (your own persist_id)"},
-    {"name": "x", "type": "integer", "required": false, "description": "Target x in 1/16 tile units"},
-    {"name": "y", "type": "integer", "required": false, "description": "Target y in 1/16 tile units"},
-    {"name": "level", "type": "integer", "required": false, "default": 1, "description": "Floor level (default 1)"},
-    {"name": "target_object_id", "type": "integer", "required": false, "description": "object_id of a landmark to walk to (from nearby_objects)"}
+    {
+      "name": "sim_id",
+      "type": "integer",
+      "required": true,
+      "description": "PersistID of the walking Sim (your own persist_id)"
+    },
+    {
+      "name": "x",
+      "type": "integer",
+      "required": false,
+      "description": "Target x in 1/16 tile units"
+    },
+    {
+      "name": "y",
+      "type": "integer",
+      "required": false,
+      "description": "Target y in 1/16 tile units"
+    },
+    {
+      "name": "level",
+      "type": "integer",
+      "required": false,
+      "default": 1,
+      "description": "Floor level (default 1)"
+    },
+    {
+      "name": "target_object_id",
+      "type": "integer",
+      "required": false,
+      "description": "object_id of a landmark to walk to (from nearby_objects)"
+    }
   ],
-  "produces_tags": [{"tag": "freesims:walk-to", "cardinality": "exactly_one"}],
+  "produces_tags": [
+    {
+      "tag": "freesims:walk-to",
+      "cardinality": "exactly_one"
+    }
+  ],
   "antecedents": "none",
   "signing": "member_key",
-  "rate_limit": {"max": 30, "per": "sender", "window": "1m"},
+  "rate_limit": {
+    "max": 30,
+    "per": "sender",
+    "window": "1m"
+  },
   "response": "sync"
 }
