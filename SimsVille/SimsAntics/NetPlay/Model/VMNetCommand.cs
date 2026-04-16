@@ -44,6 +44,7 @@ namespace FSO.SimAntics.NetPlay.Model
             { VMCommandType.QueryCatalog, typeof(VMNetQueryCatalogCmd) },
             { VMCommandType.LoadLot, typeof(VMNetLoadLotCmd) },
             { VMCommandType.QuerySimState, typeof(VMNetQuerySimStateCmd) },
+            { VMCommandType.QueryInventory, typeof(VMNetQueryInventoryCmd) },
 
         };
         public static Dictionary<Type, VMCommandType> ReverseMap = CmdMap.ToDictionary(x => x.Value, x => x.Key);
@@ -152,6 +153,13 @@ namespace FSO.SimAntics.NetPlay.Model
         /// that PerceptionEmitter emits — regardless of whether the Sim is idle.
         /// Response payload: {"type":"perception",...} (full perception object).
         /// </summary>
-        QuerySimState = 38
+        QuerySimState = 38,
+
+        /// <summary>
+        /// Query a Sim's current inventory contents on demand (reeims-2ec).
+        /// Agent sends ActorUID; game responds with the current vm.MyInventory list
+        /// as a JSON array. Response payload: {"inventory":[{object_pid,guid,name,value,inventory_index}...]}.
+        /// </summary>
+        QueryInventory = 39
     }
 }

@@ -327,6 +327,16 @@ namespace FSO.SimAntics.NetPlay.Drivers
         }
 
         /// <summary>
+        /// Emits a response frame for a QueryInventory command (reeims-2ec).
+        /// On success, payloadJson is {"inventory":[...]} built from vm.MyInventory.
+        /// Format: {"type":"response","request_id":"...","status":"ok","payload":{"inventory":[...]}}
+        /// </summary>
+        internal void SendInventoryResponse(string requestId, string status, string payloadJson)
+        {
+            SendResponseFrameWithPayload(requestId, status, payloadJson);
+        }
+
+        /// <summary>
         /// Emits a response frame for a QuerySimState command (reeims-9e0).
         /// On success, payloadJson is the full serialized perception object.
         /// On error, errorKey is the short error string (e.g. "sim_not_found").

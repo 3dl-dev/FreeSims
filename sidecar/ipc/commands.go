@@ -28,6 +28,9 @@ const (
 	CmdDeleteObject      VMCommandType = 9
 	CmdGoto              VMCommandType = 10
 	CmdChangeLotSize     VMCommandType = 25
+	CmdSendToInventory   VMCommandType = 21
+	CmdPlaceInventory    VMCommandType = 22
+	CmdQueryInventory    VMCommandType = 39
 	CmdQueryCatalog      VMCommandType = 36
 	CmdLoadLot           VMCommandType = 37
 	CmdQuerySimState     VMCommandType = 38
@@ -519,5 +522,132 @@ func (c *QuerySimStateCmd) Serialize(buf *bytes.Buffer) error {
 	b := make([]byte, 4)
 	binary.LittleEndian.PutUint32(b, c.SimPersistID)
 	buf.Write(b)
+	return nil
+}
+
+// --- SendToInventory command (reeims-2ec) ---
+//
+// SendToInventoryCmd moves an object (by ObjectPID) from the lot into the
+// actor's inventory. The C# Execute() adds the item to vm.MyInventory and
+// removes it from the lot when Success=true.
+//
+// Wire format (after VMCommandType byte):
+//
+//	[ActorUID: 4 bytes LE]
+//	[ObjectPID: uint32 LE]    — PersistID of the object to move to inventory
+//	[Success: byte]           — .NET BinaryWriter.Write(bool): 0x00 or 0x01
+//
+// Note: no RequestID tail — C# VMNetSendToInventoryCmd.Deserialize does not
+// call DeserializeRequestID. Use update-inventory after this command to
+// confirm the inventory change via a correlated response.
+//
+// VMCommandType byte: 21
+type SendToInventoryCmd struct {
+	ActorUID  uint32
+	ObjectPID uint32
+	Success   bool // true = move to inventory; false = unlock (error path)
+}
+
+func (c *SendToInventoryCmd) CmdType() VMCommandType { return CmdSendToInventory }
+
+func (c *SendToInventoryCmd) Serialize(buf *bytes.Buffer) error {
+	writeActorUID(buf, c.ActorUID)
+	b := make([]byte, 5)
+	binary.LittleEndian.PutUint32(b[0:4], c.ObjectPID)
+	if c.Success {
+		b[4] = 1
+	}
+	buf.Write(b)
+	return nil
+}
+
+// --- PlaceInventory command (reeims-2ec) ---
+//
+// PlaceInventoryCmd places an inventory object back onto the lot at a given
+// position. The C# Execute() uses TryPlace() to instantiate the object at
+// the given tile coordinates.
+//
+// Wire format (after VMCommandType byte):
+//
+//	[ActorUID: 4 bytes LE]
+//	[ObjectPID: uint32 LE]    — PersistID of the inventory item to place
+//	[x: int16 LE]             — tile x in 1/16 units
+//	[y: int16 LE]             — tile y in 1/16 units
+//	[level: sbyte]            — floor level (1 = ground)
+//	[dir: byte]               — Direction enum byte (NORTH=1, EAST=4, SOUTH=16, WEST=64)
+//	[GUID: uint32 LE]         — catalog GUID of the object (needed by TryPlace)
+//	[dataLen: int32 LE]       — byte length of saved object state (0 = use fresh instance)
+//	[data: []byte]            — optional serialized VMStandaloneObjectMarshal (dataLen bytes)
+//	[mode: byte]              — PurchaseMode enum byte (Normal=0, Donate=1, Disallowed=2)
+//
+// VMCommandType byte: 22
+type PlaceInventoryCmd struct {
+	ActorUID  uint32
+	ObjectPID uint32
+	X         int16
+	Y         int16
+	Level     int8
+	Dir       byte
+	GUID      uint32
+	Data      []byte // nil or empty = instantiate fresh object
+	Mode      byte   // PurchaseMode: 0=Normal, 1=Donate, 2=Disallowed
+}
+
+func (c *PlaceInventoryCmd) CmdType() VMCommandType { return CmdPlaceInventory }
+
+func (c *PlaceInventoryCmd) Serialize(buf *bytes.Buffer) error {
+	writeActorUID(buf, c.ActorUID)
+
+	b := make([]byte, 14)
+	binary.LittleEndian.PutUint32(b[0:4], c.ObjectPID)
+	binary.LittleEndian.PutUint16(b[4:6], uint16(c.X))
+	binary.LittleEndian.PutUint16(b[6:8], uint16(c.Y))
+	b[8] = byte(c.Level)
+	b[9] = c.Dir
+	binary.LittleEndian.PutUint32(b[10:14], c.GUID)
+	buf.Write(b)
+
+	// dataLen: int32 LE
+	dataLen := len(c.Data)
+	lenBuf := make([]byte, 4)
+	binary.LittleEndian.PutUint32(lenBuf, uint32(dataLen))
+	buf.Write(lenBuf)
+	if dataLen > 0 {
+		buf.Write(c.Data)
+	}
+
+	// mode: byte (PurchaseMode)
+	buf.WriteByte(c.Mode)
+	return nil
+}
+
+// --- QueryInventory command (reeims-2ec) ---
+//
+// QueryInventoryCmd requests the current inventory list for the actor's VM.
+// The C# VMNetQueryInventoryCmd.Execute() reads vm.MyInventory and emits a
+// JSON response frame via VMIPCDriver.SendInventoryResponse.
+//
+// Wire format (after VMCommandType byte):
+//
+//	[ActorUID: 4 bytes LE]
+//	[hasRequestID: byte]      — 0 or 1
+//	[if 1: 7-bit-length-prefixed UTF-8 requestID]
+//
+// Response on success:
+//
+//	{"type":"response","request_id":"...","status":"ok",
+//	 "payload":{"inventory":[{"object_pid":N,"guid":N,"name":"...","value":N,"inventory_index":N}...]}}
+//
+// VMCommandType byte: 39
+type QueryInventoryCmd struct {
+	ActorUID  uint32
+	RequestID string // optional correlation ID
+}
+
+func (c *QueryInventoryCmd) CmdType() VMCommandType { return CmdQueryInventory }
+
+func (c *QueryInventoryCmd) Serialize(buf *bytes.Buffer) error {
+	writeActorUID(buf, c.ActorUID)
+	writeRequestIDTail(buf, c.RequestID)
 	return nil
 }
