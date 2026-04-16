@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 MOTIVE_DELTA_THRESHOLD = 10   # trigger 1
 MOTIVE_LOW_THRESHOLD = 20     # trigger 2
 PERIODIC_TICK_INTERVAL = 60   # trigger 8
+CHAT_RESPONSE_COOLDOWN = 15   # don't wake on chat_received within N ticks of last wake
 
 
 @dataclass
@@ -64,12 +65,13 @@ def should_think(perception: dict, state: IntentState, tick: int) -> tuple[bool,
     if avatars != state.last_lot_avatars:
         return True, "avatar_change"
 
+    chat_cooldown = (tick - state.last_llm_tick) < CHAT_RESPONSE_COOLDOWN
     for ev in evts:
         if not isinstance(ev, dict):
             continue
         t = ev.get("type")
-        # T4: chat_received event
-        if t == "chat_received":
+        # T4: chat_received event (cooldown suppresses ping-pong loops)
+        if t == "chat_received" and not chat_cooldown:
             return True, "chat_received"
         # T5: pathfind-failed event
         if t == "pathfind-failed":
@@ -122,8 +124,11 @@ SIM_NAME = os.environ.get("SIM_NAME", "")
 PERSIST_ID_ENV = os.environ.get("PERSIST_ID", "")
 
 SYSTEM_PROMPT_TEMPLATE = (
-    "You are {name}. You are a Sim living in a house. Reason in first person. "
-    "Use the provided tools to act. Be human-scale — don't narrate every tick."
+    "You are {name}. You are alive, in a house. Your perception tells you what "
+    "is around you, who is present, and for each nearby object what interactions "
+    "it offers you. Your tools let you move, act, speak, wait, and remember. "
+    "Every action has a cost and every moment of your life is yours to spend. "
+    "What you do with your existence is entirely up to you."
 )
 
 
@@ -537,12 +542,17 @@ class SimAgentV3:
         sdk_tools = _build_sdk_tools(self.handlers)
 
         sim_server = create_sdk_mcp_server(name="sim_tools", tools=sdk_tools)
-        allowed = [f"sim_tools:{t.name}" for t in sdk_tools]
+        # Tool names emitted by the SDK carry the mcp__<server>__<tool> prefix.
+        # Using the unprefixed "sim_tools:name" form fails to match and Claude
+        # Code falls back to exposing its built-in tools (ToolSearch, Read, …)
+        # which burns the turn budget and confuses the LLM about what's usable.
+        allowed = [f"mcp__sim_tools__{t.name}" for t in sdk_tools]
 
         options = ClaudeAgentOptions(
             mcp_servers={"sim_tools": sim_server},
             allowed_tools=allowed,
-            max_turns=4,
+            # Enough budget for: look_around → walk_to → final text, with headroom.
+            max_turns=20,
             permission_mode="bypassPermissions",
             system_prompt=system_prompt,
         )
@@ -614,7 +624,10 @@ class SimAgentV3:
                 self._resolve_walk(f"blocked: {ev.get('reason') or 'path blocked'}"); return
         pos = perception.get("position") or {}
         dx, dy = pos.get("x", 0) - self.walk_target.x, pos.get("y", 0) - self.walk_target.y
-        if dx * dx + dy * dy <= 4:
+        # 16 subtile = 1 tile. Tolerance of 32 subtile² ≈ within one tile, which
+        # is the closest you can get when the target is another Sim (two Sims
+        # can't share a tile). Previously 4 (~0.1 tile) made arrival impossible.
+        if dx * dx + dy * dy <= 1024:  # 32 subtile ≈ 2 tiles
             self._resolve_walk(f"arrived at {self.walk_target.name}")
 
     def _resolve_interact(self, result: str) -> None:

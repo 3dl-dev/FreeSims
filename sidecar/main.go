@@ -18,6 +18,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -130,18 +131,27 @@ var archKindLookup = map[string]ipc.ArchCommandType{
 
 func main() {
 	sockPath := flag.String("sock", "/tmp/freesims-ipc.sock", "path to VMIPCDriver Unix socket")
-	campfire := flag.Bool("campfire", false, "enable campfire convention publishing (requires CampfireSDK integration)")
+	campfire := flag.Bool("campfire", false, "enable campfire convention server (publish declarations, serve handlers, bridge perception)")
 	flag.Parse()
 
 	log.SetOutput(os.Stderr)
 	log.SetFlags(log.Ltime | log.Lmicroseconds)
 
-	if *campfire {
-		log.Println("[sidecar] --campfire: convention declarations are embedded (6 operations)")
-		log.Println("[sidecar] --campfire: CampfireSDK integration not yet wired — declarations will be published when SDK is available")
-	}
-
 	client := ipc.NewClient(*sockPath)
+
+	ctx, cancelAll := context.WithCancel(context.Background())
+	defer cancelAll()
+
+	if *campfire {
+		lotID, stop, err := StartConventionServer(ctx, client)
+		if err != nil {
+			log.Fatalf("[sidecar] campfire bringup failed: %v", err)
+		}
+		defer stop()
+		// Emit the lot beacon on stdout so the demo harness can share it with
+		// agents. Single line, prefixed so agents/scripts can grep.
+		fmt.Printf("FREESIMS_CF_LOT=%s\n", lotID)
+	}
 
 	// Handle signals for clean shutdown
 	sigCh := make(chan os.Signal, 1)
@@ -150,6 +160,7 @@ func main() {
 		<-sigCh
 		log.Println("[sidecar] shutting down")
 		client.Close()
+		cancelAll()
 		os.Exit(0)
 	}()
 
@@ -249,6 +260,12 @@ func main() {
 		log.Printf("[sidecar] stdin read error: %v", err)
 	}
 
+	// When campfire is serving, stdin EOF shouldn't terminate the process —
+	// the campfire loop is the authoritative command source. Block on ctx
+	// (cancelled by SIGINT/SIGTERM via the signal handler above).
+	if *campfire {
+		<-ctx.Done()
+	}
 	client.Close()
 }
 
@@ -283,9 +300,17 @@ func parseCommand(jcmd jsonCommand) (ipc.Command, error) {
 		if level == 0 {
 			level = 1
 		}
+		// Goto marker (GOTO_GUID 0x7C4) exposes interactions {2:"Walk Here",
+		// 4:"Run Here", 6:"Face Here", 7:"Point Here", 9:"Request Funds"}.
+		// Interaction 0 is not defined on the marker — PushUserInteraction
+		// silently drops it. Default to "Walk Here" (id=2).
+		interaction := uint16(2)
+		if jcmd.InteractionID != 0 {
+			interaction = jcmd.InteractionID
+		}
 		return &ipc.GotoCmd{
 			ActorUID:    jcmd.ActorUID,
-			Interaction: 0, // default interaction for goto marker
+			Interaction: interaction,
 			X:           jcmd.X,
 			Y:           jcmd.Y,
 			Level:       level,
