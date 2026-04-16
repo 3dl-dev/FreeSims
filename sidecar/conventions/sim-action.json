@@ -1,0 +1,26 @@
+{
+  "convention": "freesims",
+  "version": "1.1",
+  "operation": "sim-action",
+  "description": "Perform an action as a Sim (move, interact, speak, cancel, or inventory management)",
+  "args": [
+    {"name": "action", "type": "string", "required": true, "enum": ["goto", "interact", "speak", "cancel-queue", "send-to-inventory", "place-inventory", "update-inventory"], "description": "Action type"},
+    {"name": "sim_id", "type": "integer", "required": true, "description": "PersistID (ActorUID) of the Sim"},
+    {"name": "target_object_id", "type": "integer", "required": false, "description": "ObjectID of target (for interact)"},
+    {"name": "interaction_id", "type": "integer", "required": false, "description": "Interaction number (for interact)"},
+    {"name": "x", "type": "integer", "required": false, "description": "Position x in 1/16 tile units (for goto, place-inventory)"},
+    {"name": "y", "type": "integer", "required": false, "description": "Position y in 1/16 tile units (for goto, place-inventory)"},
+    {"name": "level", "type": "integer", "required": false, "default": 1, "description": "Floor level (for goto, place-inventory)"},
+    {"name": "text", "type": "string", "required": false, "maxLength": 200, "description": "Chat message (for speak)"},
+    {"name": "action_uid", "type": "integer", "required": false, "description": "Action UID to cancel (for cancel-queue)"},
+    {"name": "object_persist_id", "type": "integer", "required": false, "description": "PersistID of the lot object to move to inventory (for send-to-inventory) or inventory item to place on lot (for place-inventory)"},
+    {"name": "guid", "type": "integer", "required": false, "description": "Catalog GUID of the inventory item (required for place-inventory)"},
+    {"name": "dir", "type": "integer", "required": false, "default": 0, "description": "Direction byte: NORTH=1, EAST=4, SOUTH=16, WEST=64 (for place-inventory)"},
+    {"name": "request_id", "type": "string", "required": false, "description": "Correlation ID for response matching (recommended for update-inventory)"}
+  ],
+  "produces_tags": [{"tag": "freesims:sim-action", "cardinality": "exactly_one"}],
+  "antecedents": "none",
+  "signing": "member_key",
+  "rate_limit": {"max": 30, "per": "sender", "window": "1m"},
+  "response": "sync"
+}

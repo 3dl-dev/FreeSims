@@ -746,3 +746,219 @@ func TestLoadLotCmdSerialize_RequestIDBeforeHouseXml(t *testing.T) {
 		t.Errorf("byte after house_xml length should be 'x', got 0x%02x", data[9])
 	}
 }
+
+// --- Inventory command tests (reeims-2ec) ---
+
+// SendToInventoryCmd wire format: [type=21][uid:4][objectPID:4][success:1] = 10 bytes
+
+func TestSendToInventoryCmdType_Is21(t *testing.T) {
+	cmd := &SendToInventoryCmd{}
+	if cmd.CmdType() != CmdSendToInventory {
+		t.Errorf("CmdType() = %d, want %d", cmd.CmdType(), CmdSendToInventory)
+	}
+	if byte(CmdSendToInventory) != 21 {
+		t.Errorf("CmdSendToInventory byte value = %d, want 21", byte(CmdSendToInventory))
+	}
+}
+
+func TestSendToInventoryCmdSerialize_Success(t *testing.T) {
+	cmd := &SendToInventoryCmd{ActorUID: 28, ObjectPID: 0xDEAD1234, Success: true}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Layout: [type=21][uid:4][objectPID:4][success:1] = 10 bytes
+	if data[0] != byte(CmdSendToInventory) {
+		t.Errorf("type byte = %d, want 21", data[0])
+	}
+	if len(data) != 10 {
+		t.Fatalf("total bytes = %d, want 10", len(data))
+	}
+	if binary.LittleEndian.Uint32(data[1:5]) != 28 {
+		t.Errorf("ActorUID mismatch")
+	}
+	if binary.LittleEndian.Uint32(data[5:9]) != 0xDEAD1234 {
+		t.Errorf("ObjectPID = %#x, want %#x", binary.LittleEndian.Uint32(data[5:9]), uint32(0xDEAD1234))
+	}
+	// success=true -> BinaryWriter.Write(bool)=0x01
+	if data[9] != 0x01 {
+		t.Errorf("Success byte = 0x%02x, want 0x01", data[9])
+	}
+}
+
+func TestSendToInventoryCmdSerialize_NoSuccess(t *testing.T) {
+	cmd := &SendToInventoryCmd{ActorUID: 1, ObjectPID: 42, Success: false}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// success=false -> 0x00
+	if data[9] != 0x00 {
+		t.Errorf("Success byte = 0x%02x, want 0x00", data[9])
+	}
+}
+
+// PlaceInventoryCmd wire format: [type=22][uid:4][objectPID:4][x:2][y:2][level:1][dir:1][guid:4][dataLen:4][data...][mode:1]
+// Minimum (no data): 10 + 14 + 4 + 1 = wait: 1+4+4+2+2+1+1+4+4+0+1 = 24 bytes
+
+func TestPlaceInventoryCmdType_Is22(t *testing.T) {
+	cmd := &PlaceInventoryCmd{}
+	if cmd.CmdType() != CmdPlaceInventory {
+		t.Errorf("CmdType() = %d, want %d", cmd.CmdType(), CmdPlaceInventory)
+	}
+	if byte(CmdPlaceInventory) != 22 {
+		t.Errorf("CmdPlaceInventory byte value = %d, want 22", byte(CmdPlaceInventory))
+	}
+}
+
+func TestPlaceInventoryCmdSerialize_NoData(t *testing.T) {
+	cmd := &PlaceInventoryCmd{
+		ActorUID:  28,
+		ObjectPID: 0xABCD1234,
+		X:         5 * 16,
+		Y:         7 * 16,
+		Level:     1,
+		Dir:       16, // SOUTH
+		GUID:      0x12345678,
+		Data:      nil,
+		Mode:      0, // Normal
+	}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Layout: [type=22][uid:4][objectPID:4][x:2][y:2][level:1][dir:1][guid:4][dataLen:4][mode:1]
+	// = 1 + 4 + 4 + 2 + 2 + 1 + 1 + 4 + 4 + 0 + 1 = 24 bytes
+	if data[0] != byte(CmdPlaceInventory) {
+		t.Errorf("type byte = %d, want 22", data[0])
+	}
+	if len(data) != 24 {
+		t.Fatalf("total bytes = %d, want 24", len(data))
+	}
+	if binary.LittleEndian.Uint32(data[1:5]) != 28 {
+		t.Errorf("ActorUID mismatch")
+	}
+	if binary.LittleEndian.Uint32(data[5:9]) != 0xABCD1234 {
+		t.Errorf("ObjectPID mismatch")
+	}
+	if int16(binary.LittleEndian.Uint16(data[9:11])) != 80 {
+		t.Errorf("X = %d, want 80 (5*16)", int16(binary.LittleEndian.Uint16(data[9:11])))
+	}
+	if int16(binary.LittleEndian.Uint16(data[11:13])) != 112 {
+		t.Errorf("Y = %d, want 112 (7*16)", int16(binary.LittleEndian.Uint16(data[11:13])))
+	}
+	if int8(data[13]) != 1 {
+		t.Errorf("Level = %d, want 1", int8(data[13]))
+	}
+	if data[14] != 16 {
+		t.Errorf("Dir = %d, want 16 (SOUTH)", data[14])
+	}
+	if binary.LittleEndian.Uint32(data[15:19]) != 0x12345678 {
+		t.Errorf("GUID mismatch")
+	}
+	// dataLen = 0
+	if binary.LittleEndian.Uint32(data[19:23]) != 0 {
+		t.Errorf("dataLen = %d, want 0", binary.LittleEndian.Uint32(data[19:23]))
+	}
+	// mode = 0 (Normal)
+	if data[23] != 0 {
+		t.Errorf("Mode = %d, want 0", data[23])
+	}
+}
+
+func TestPlaceInventoryCmdSerialize_WithData(t *testing.T) {
+	stateData := []byte{0x01, 0x02, 0x03}
+	cmd := &PlaceInventoryCmd{
+		ActorUID:  1,
+		ObjectPID: 99,
+		X:         0,
+		Y:         0,
+		Level:     1,
+		Dir:       1, // NORTH
+		GUID:      0xABCDEF01,
+		Data:      stateData,
+		Mode:      0,
+	}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Total: 1+4+4+2+2+1+1+4+4+3+1 = 27 bytes
+	if len(data) != 27 {
+		t.Fatalf("total bytes = %d, want 27", len(data))
+	}
+	// dataLen = 3 at offset 19
+	if binary.LittleEndian.Uint32(data[19:23]) != 3 {
+		t.Errorf("dataLen = %d, want 3", binary.LittleEndian.Uint32(data[19:23]))
+	}
+	// data bytes at offset 23-25
+	if data[23] != 0x01 || data[24] != 0x02 || data[25] != 0x03 {
+		t.Errorf("data bytes = %v, want [1 2 3]", data[23:26])
+	}
+	// mode at offset 26
+	if data[26] != 0 {
+		t.Errorf("Mode = %d, want 0", data[26])
+	}
+}
+
+// QueryInventoryCmd wire format: [type=39][uid:4][hasRequestID:1][optional requestID]
+
+func TestQueryInventoryCmdType_Is39(t *testing.T) {
+	cmd := &QueryInventoryCmd{}
+	if cmd.CmdType() != CmdQueryInventory {
+		t.Errorf("CmdType() = %d, want %d", cmd.CmdType(), CmdQueryInventory)
+	}
+	if byte(CmdQueryInventory) != 39 {
+		t.Errorf("CmdQueryInventory byte value = %d, want 39", byte(CmdQueryInventory))
+	}
+}
+
+func TestQueryInventoryCmdSerialize_NoRequestID(t *testing.T) {
+	cmd := &QueryInventoryCmd{ActorUID: 28, RequestID: ""}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Layout: [type=39][uid:4][hasRequestID=0] = 6 bytes
+	if data[0] != byte(CmdQueryInventory) {
+		t.Errorf("type byte = %d, want 39", data[0])
+	}
+	if len(data) != 6 {
+		t.Fatalf("total bytes = %d, want 6", len(data))
+	}
+	if binary.LittleEndian.Uint32(data[1:5]) != 28 {
+		t.Errorf("ActorUID = %d, want 28", binary.LittleEndian.Uint32(data[1:5]))
+	}
+	if data[5] != 0x00 {
+		t.Errorf("hasRequestID = 0x%02x, want 0x00", data[5])
+	}
+}
+
+func TestQueryInventoryCmdSerialize_WithRequestID(t *testing.T) {
+	cmd := &QueryInventoryCmd{ActorUID: 28, RequestID: "inv1"}
+	data, err := SerializeCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Layout: [type=39][uid:4][hasRequestID=1][len(4)="inv1"] = 11 bytes
+	if data[0] != byte(CmdQueryInventory) {
+		t.Errorf("type byte = %d, want 39", data[0])
+	}
+	if len(data) != 11 {
+		t.Fatalf("total bytes = %d, want 11", len(data))
+	}
+	if data[5] != 0x01 {
+		t.Errorf("hasRequestID = 0x%02x, want 0x01", data[5])
+	}
+	if data[6] != 0x04 {
+		t.Errorf("requestID length = 0x%02x, want 0x04", data[6])
+	}
+	if string(data[7:11]) != "inv1" {
+		t.Errorf("requestID = %q, want %q", string(data[7:11]), "inv1")
+	}
+}

@@ -76,6 +76,13 @@ type jsonCommand struct {
 
 	// QuerySimState fields
 	SimPersistID uint32 `json:"sim_persist_id,omitempty"`
+
+	// Inventory fields (reeims-2ec)
+	// ObjectPersistID is the uint32 PersistID of an inventory object.
+	// Use this instead of object_id (int16 runtime ID) for inventory commands.
+	ObjectPersistID uint32 `json:"object_persist_id,omitempty"`
+	// GUID is the catalog GUID for place-inventory (required when placing from inventory).
+	// For send-to-inventory the engine derives GUID from the live object.
 }
 
 // jsonArchOp mirrors ipc.ArchOp for JSON decoding.
@@ -364,6 +371,52 @@ func parseCommand(jcmd jsonCommand) (ipc.Command, error) {
 			ActorUID:     jcmd.ActorUID,
 			RequestID:    jcmd.RequestID,
 			SimPersistID: jcmd.SimPersistID,
+		}, nil
+
+	case "send-to-inventory":
+		// Moves an object (identified by object_persist_id) from the lot into the actor's
+		// inventory. Always sends Success=true (the normal path: object is saved and deleted).
+		if jcmd.ObjectPersistID == 0 {
+			return nil, fmt.Errorf("send-to-inventory command requires non-zero 'object_persist_id'")
+		}
+		return &ipc.SendToInventoryCmd{
+			ActorUID:  jcmd.ActorUID,
+			ObjectPID: jcmd.ObjectPersistID,
+			Success:   true,
+		}, nil
+
+	case "place-inventory":
+		// Places an inventory item (identified by object_persist_id) back onto the lot.
+		// Requires: object_persist_id, guid, x, y. Level defaults to 1.
+		if jcmd.ObjectPersistID == 0 {
+			return nil, fmt.Errorf("place-inventory command requires non-zero 'object_persist_id'")
+		}
+		if jcmd.GUID == 0 {
+			return nil, fmt.Errorf("place-inventory command requires non-zero 'guid'")
+		}
+		level := jcmd.Level
+		if level == 0 {
+			level = 1
+		}
+		return &ipc.PlaceInventoryCmd{
+			ActorUID:  jcmd.ActorUID,
+			ObjectPID: jcmd.ObjectPersistID,
+			X:         jcmd.X,
+			Y:         jcmd.Y,
+			Level:     level,
+			Dir:       jcmd.Dir,
+			GUID:      jcmd.GUID,
+			Data:      nil,  // fresh instantiation (no saved state)
+			Mode:      0,    // PurchaseMode.Normal
+		}, nil
+
+	case "update-inventory":
+		// Queries the current inventory list for the actor's VM.
+		// Emits a JSON response frame with {inventory:[{object_pid,guid,name,value,inventory_index}...]}.
+		// Requires request_id to receive the response.
+		return &ipc.QueryInventoryCmd{
+			ActorUID:  jcmd.ActorUID,
+			RequestID: jcmd.RequestID,
 		}, nil
 
 	default:
