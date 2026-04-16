@@ -195,8 +195,12 @@ func (c *Client) readLoop() {
 			return
 		}
 
-		if len(payload) == ackPayloadSize && (len(payload) == 0 || payload[0] != '{') {
-			// Binary tick ack: exactly 16 bytes, does not start with '{'
+		// Frame discrimination by LENGTH only. Tick acks are always exactly 16 bytes.
+		// JSON frames are always > 16 bytes (shortest valid type string "dialog" already
+		// puts a minimal frame well past 16 bytes). Do NOT check payload[0] for '{' —
+		// tick_id byte[0] can legitimately equal 0x7b (e.g. tick_id 379, 635, 891, ...),
+		// which would mis-route the ack to the JSON parser.
+		if len(payload) == ackPayloadSize {
 			ack := TickAck{
 				TickID:       binary.LittleEndian.Uint32(payload[0:4]),
 				CommandCount: binary.LittleEndian.Uint32(payload[4:8]),
