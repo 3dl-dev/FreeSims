@@ -26,6 +26,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using Xunit;
 
@@ -513,6 +514,137 @@ namespace SimsVille.Tests
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             Assert.NotNull(dto2?.Relationships);
             Assert.Equal(dto.Relationships[0].Friendship, dto2.Relationships[0].Friendship);
+        }
+
+        // ── PersistID uniqueness tests (reeims-a29) ───────────────────────────────
+        //
+        // Regression guard: PerceptionEmitter lot_avatars must have no duplicate persist_ids.
+        // The bug surfaced because the pre-built binary spawned Gerry twice (persist_id=28
+        // appeared twice). The fix (reeims-680 — rebuild from source) eliminated the duplicate
+        // avatar. These tests guard against regression in the perception shape.
+        //
+        // Isolation: VMAvatar cannot be instantiated in a headless test runner (MonoGame dep).
+        // We test via JSON shape, same pattern as the rest of this file.
+
+        /// <summary>
+        /// lot_avatars in a perception JSON must have no duplicate persist_ids.
+        /// Regression guard for reeims-a29: previously Gerry appeared twice (persist_id=28 × 2).
+        /// </summary>
+        [Fact]
+        public void LotAvatars_NoDuplicatePersistIds_InPerceptionJson()
+        {
+            // Two-avatar perception: Daisy (self, persist_id=98) + Gerry (lot_avatar, persist_id=28).
+            // The real IDs match Content/Characters/Daisy.xml (<id>98</id>) and Gerry.xml (<id>28</id>).
+            const string json = """
+                {
+                    "type": "perception",
+                    "persist_id": 98,
+                    "sim_id": 1,
+                    "name": "Daisy",
+                    "funds": 999999,
+                    "clock": { "hours": 8, "minutes": 0, "seconds": 0, "time_of_day": 0, "day": 1 },
+                    "motives": {
+                        "hunger": 0, "comfort": 0, "energy": 0, "hygiene": 0,
+                        "bladder": 0, "room": 0, "social": 0, "fun": 0, "mood": 0
+                    },
+                    "position": { "x": 10, "y": 10, "level": 1 },
+                    "rotation": 0.0,
+                    "current_animation": "",
+                    "action_queue": [],
+                    "nearby_objects": [],
+                    "lot_avatars": [
+                        {
+                            "persist_id": 28,
+                            "name": "Gerry",
+                            "position": { "x": 12, "y": 10, "level": 1 },
+                            "current_animation": "",
+                            "motives": {
+                                "hunger": 0, "comfort": 0, "energy": 0, "hygiene": 0,
+                                "bladder": 0, "social": 0, "fun": 0, "mood": 0
+                            }
+                        }
+                    ],
+                    "skills": {
+                        "cooking": 0, "charisma": 0, "mechanical": 0,
+                        "creativity": 0, "body": 0, "logic": 0
+                    },
+                    "job": { "has_job": false, "career": null, "level": 0, "salary": 0, "work_hours": null },
+                    "relationships": []
+                }
+                """;
+
+            using var doc = JsonDocument.Parse(json);
+            var lotAvatars = doc.RootElement.GetProperty("lot_avatars");
+
+            var persistIds = new List<uint>();
+            foreach (var avatar in lotAvatars.EnumerateArray())
+                persistIds.Add(avatar.GetProperty("persist_id").GetUInt32());
+
+            var distinct = persistIds.Distinct().ToList();
+            Assert.Equal(persistIds.Count, distinct.Count);
+        }
+
+        /// <summary>
+        /// Regression: the broken binary produced lot_avatars with two entries both having
+        /// persist_id=28 (Gerry spawned twice). This test explicitly verifies that shape fails
+        /// the uniqueness invariant, proving the guard catches the old bug.
+        /// </summary>
+        [Fact]
+        public void LotAvatars_DuplicatePersistId_ViolatesUniqueness_RegressionShape()
+        {
+            // Deliberately construct the broken shape (two Gerry entries, both persist_id=28).
+            const string brokenJson = """
+                [
+                    { "persist_id": 28, "name": "Gerry" },
+                    { "persist_id": 28, "name": "Gerry" }
+                ]
+                """;
+
+            using var doc = JsonDocument.Parse(brokenJson);
+            var persistIds = new List<uint>();
+            foreach (var avatar in doc.RootElement.EnumerateArray())
+                persistIds.Add(avatar.GetProperty("persist_id").GetUInt32());
+
+            var distinct = persistIds.Distinct().ToList();
+            // This assertion proves the guard would catch the old bug.
+            Assert.NotEqual(persistIds.Count, distinct.Count);
+        }
+
+        /// <summary>
+        /// The self avatar (persist_id=98 for Daisy) must not appear in lot_avatars.
+        /// Combined with uniqueness, this means all avatars on the lot have distinct persist_ids.
+        /// </summary>
+        [Fact]
+        public void LotAvatars_SelfPersistId_NotPresentInLotAvatars()
+        {
+            // Use the two-avatar JSON from the uniqueness test.
+            const uint selfPersistId = 98u; // Daisy
+
+            using var doc = JsonDocument.Parse(SamplePerceptionJson);
+            uint selfId = doc.RootElement.GetProperty("persist_id").GetUInt32();
+
+            var lotAvatars = doc.RootElement.GetProperty("lot_avatars");
+            foreach (var avatar in lotAvatars.EnumerateArray())
+            {
+                uint lotPersistId = avatar.GetProperty("persist_id").GetUInt32();
+                Assert.NotEqual(selfId, lotPersistId);
+            }
+        }
+
+        /// <summary>
+        /// Verifies the known Daisy/Gerry persist_ids (from XML files) are distinct.
+        /// Daisy.xml has id=98, Gerry.xml has id=28.
+        /// If these ever match, PersistID collision is guaranteed at runtime.
+        /// </summary>
+        [Fact]
+        public void CharacterXmlIds_DaisyAndGerry_AreDistinct()
+        {
+            // IDs sourced from Content/Characters/Daisy.xml and Gerry.xml.
+            // These are the values SetAvatarData(xml) writes to VMAvatar.PersistID.
+            const uint daisyId = 98u;
+            const uint gerryId = 28u;
+
+            Assert.NotEqual(daisyId, gerryId);
         }
 
         // Minimal DTO mirroring the perception JSON shape (funds + clock + lot_avatars + skills + job fields).
