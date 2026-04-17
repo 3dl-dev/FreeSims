@@ -584,18 +584,13 @@ namespace FSO.Client.UI.Screens
                 return;
             }
 
-            // Resolve path. Accept both bare "house2.xml" and absolute paths.
-            string housePath;
-            if (Path.IsPathRooted(xmlName) && File.Exists(xmlName))
-            {
-                housePath = xmlName;
-            }
-            else
-            {
-                var houseDir = Path.Combine(FSOEnvironment.ContentDir ?? "Content", "Houses");
-                if (!Directory.Exists(houseDir)) houseDir = "Content/Houses/";
-                housePath = Path.Combine(houseDir, xmlName);
-            }
+            // Resolve path. Always combine with houseDir — never accept absolute paths
+            // or directory components from agent input (security: reeims-dcb).
+            // Path.GetFileName strips any directory components (including absolute paths
+            // and traversal sequences) so the final path is always inside houseDir.
+            var houseDir = Path.Combine(FSOEnvironment.ContentDir ?? "Content", "Houses");
+            if (!Directory.Exists(houseDir)) houseDir = "Content/Houses/";
+            string housePath = Path.Combine(houseDir, Path.GetFileName(xmlName));
 
             if (!File.Exists(housePath))
             {

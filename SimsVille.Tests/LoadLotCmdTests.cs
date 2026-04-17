@@ -271,4 +271,112 @@ namespace SimsVille.Tests
             Assert.Equal(9, data.Length);
         }
     }
+
+    // -----------------------------------------------------------------
+    // LoadLotByXmlName path-safety tests (reeims-dcb).
+    //
+    // CoreGameScreen.LoadLotByXmlName previously accepted absolute paths
+    // from agent input via a Path.IsPathRooted branch. The fix removes
+    // that branch and routes ALL input through:
+    //
+    //   Path.Combine(houseDir, Path.GetFileName(xmlName))
+    //
+    // Path.GetFileName is the gatekeeper — it strips directory components
+    // from any input:
+    //   "/etc/passwd"          → "passwd"
+    //   "../../../etc/passwd"  → "passwd"  (last segment after traversal)
+    //   "house2.xml"           → "house2.xml"  (clean — unchanged)
+    //
+    // CoreGameScreen has MonoGame dependencies, so we cannot include it
+    // here. Instead we verify the BCL behaviour of Path.GetFileName
+    // (which is exactly the gatekeeper logic) plus a PathCombine helper
+    // that mirrors the fixed code path. The integration is in the
+    // CoreGameScreen source itself (verified by code review + build).
+    // -----------------------------------------------------------------
+
+    public class LoadLotXmlPathSafetyTests
+    {
+        /// <summary>
+        /// Mirrors the fixed LoadLotByXmlName path resolution:
+        ///   Path.Combine(houseDir, Path.GetFileName(xmlName))
+        /// </summary>
+        private static string ResolveLotPath(string houseDir, string xmlName)
+            => Path.Combine(houseDir, Path.GetFileName(xmlName));
+
+        [Fact]
+        public void CleanFilename_IsUnchanged()
+        {
+            var result = ResolveLotPath("/content/Houses", "house2.xml");
+            Assert.Equal("/content/Houses/house2.xml", result);
+        }
+
+        [Fact]
+        public void AbsolutePath_IsStrippedToFilenameOnly()
+        {
+            // Agent sends "/etc/passwd" — Path.GetFileName returns "passwd".
+            // Final path lands inside houseDir, not at the absolute path.
+            var houseDir = "/content/Houses";
+            var result = ResolveLotPath(houseDir, "/etc/passwd");
+            Assert.Equal("/content/Houses/passwd", result);
+            // Critically: does NOT start with "/etc/"
+            Assert.False(result.StartsWith("/etc/"));
+        }
+
+        [Fact]
+        public void RelativeTraversal_IsStrippedToFilenameOnly()
+        {
+            // Agent sends "../../etc/shadow" — Path.GetFileName returns "shadow".
+            var houseDir = "/content/Houses";
+            var result = ResolveLotPath(houseDir, "../../etc/shadow");
+            Assert.Equal("/content/Houses/shadow", result);
+            Assert.False(result.Contains(".."));
+        }
+
+        [Fact]
+        public void NestedRelativePath_IsStrippedToFilenameOnly()
+        {
+            // Agent sends "subdir/house3.xml" — only "house3.xml" is kept.
+            var houseDir = "/content/Houses";
+            var result = ResolveLotPath(houseDir, "subdir/house3.xml");
+            Assert.Equal("/content/Houses/house3.xml", result);
+        }
+
+        [Fact]
+        public void WindowsAbsolutePath_IsStrippedToFilenameOnly()
+        {
+            // Defensive test for Windows-style absolute paths.
+            // Path.GetFileName on Linux returns the full string for "C:\\path\\file.xml"
+            // as a filename (no path separator matches) — but that is safe because
+            // Path.Combine("houseDir", "C:\\path\\file.xml") on Linux produces
+            // "houseDir/C:\\path\\file.xml" (no escape). On Windows, GetFileName
+            // correctly strips to "file.xml". Either way, the path stays in houseDir.
+            var houseDir = "/content/Houses";
+            var xmlName = "C:\\windows\\system32\\config\\SAM";
+            var result = ResolveLotPath(houseDir, xmlName);
+            // On Linux: Path.GetFileName treats the entire string as the filename
+            // (backslash is not a separator), so result is
+            // "/content/Houses/C:\\windows\\system32\\config\\SAM"
+            // — still inside houseDir, not at an absolute filesystem path.
+            Assert.True(result.StartsWith(houseDir));
+        }
+
+        [Fact]
+        public void GetFileName_AbsoluteInput_ReturnsLastSegment()
+        {
+            // Direct BCL contract test — documents the exact behaviour relied upon.
+            Assert.Equal("passwd", Path.GetFileName("/etc/passwd"));
+        }
+
+        [Fact]
+        public void GetFileName_TraversalInput_ReturnsLastSegment()
+        {
+            Assert.Equal("shadow", Path.GetFileName("../../etc/shadow"));
+        }
+
+        [Fact]
+        public void GetFileName_CleanFilename_IsIdentity()
+        {
+            Assert.Equal("house1.xml", Path.GetFileName("house1.xml"));
+        }
+    }
 }
