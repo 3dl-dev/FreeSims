@@ -46,6 +46,8 @@ namespace FSO.Client.UI.Screens
             /** Background image **/
             Texture2D setupTex;
             setupTex = GetTexture((ulong)FileIDs.UIFileIDs.setup);
+            if (setupTex == null)
+                setupTex = new Texture2D(GameFacade.GraphicsDevice, 800, 600);
             Background = new UIImage(setupTex);
             var bgScale = 600f / setupTex.Height;
             Background.SetSize(setupTex.Width * bgScale, 600);

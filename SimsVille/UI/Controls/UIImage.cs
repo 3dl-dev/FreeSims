@@ -65,6 +65,7 @@ namespace FSO.Client.UI.Controls
             set
             {
                 m_Texture = value;
+                if (m_Texture == null) return;
                 if (Width == 0)
                 {
                     m_Width = m_Texture.Width;

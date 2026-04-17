@@ -937,7 +937,8 @@ namespace FSO.Client.UI.Framework
         {
             try
             {
-                return Content.Content.Get().UIGraphics.Get(id, false).Get(GameFacade.GraphicsDevice);
+                var tex = Content.Content.Get().UIGraphics.Get(id, false)?.Get(GameFacade.GraphicsDevice);
+                if (tex != null) return tex;
             }
             catch
             { }

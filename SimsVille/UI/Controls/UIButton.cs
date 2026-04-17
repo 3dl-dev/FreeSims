@@ -213,6 +213,15 @@ namespace FSO.Client.UI.Controls
                 m_Texture = value;
                 m_Bounds = Rectangle.Empty;
 
+                if (m_Texture == null)
+                {
+                    m_Width = 0;
+                    m_WidthDiv3 = 0;
+                    m_Height = 0;
+                    m_CurrentFrame = 0;
+                    return;
+                }
+
                 m_Width = m_Texture.Width / m_ImageStates;
                 m_WidthDiv3 = m_Width / 3;
                 m_Height = m_Texture.Height / m_ButtonFrames;
