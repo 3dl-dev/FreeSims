@@ -709,7 +709,7 @@ namespace FSO.Client.UI.Panels
         {
             var gd = GameFacade.GraphicsDevice;
             gd.SetRenderTarget(PreviewTarget);
-            gd.Clear(Color.TransparentBlack);
+            gd.Clear(new Color(0, 0, 0, 0));
             Batch.Begin();
 
             //64x32 base lot with a 4px border from bottom, left and right edges.
