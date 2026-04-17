@@ -36,9 +36,19 @@ namespace FSO.SimAntics.NetPlay.Model.Commands
             if (Blacklist.Contains(GUID) || caller == null) return false;
 
             //careful here! if the object can't be placed, we have to give the user their money back.
-            if (TryPlace(vm, caller)) return true;
+            if (TryPlace(vm, caller))
+            {
+                // In the local/IPC driver path Verify() is never called, so PerformTransaction
+                // was never invoked. Debit the catalog price directly from the avatar's budget
+                // here so the Sim's funds actually decrease on a successful buy.
+                if (!Verified && item != null)
+                {
+                    ((VMTSOEntityState)caller.TSOState).Budget.Transaction(-(int)item.Price);
+                }
+                return true;
+            }
             else if (vm.GlobalLink != null && item != null)
-            { 
+            {
                 vm.GlobalLink.PerformTransaction(vm, false, uint.MaxValue, caller.PersistID, (int)item.Price,
                 (bool success, int transferAmount, uint uid1, uint budget1, uint uid2, uint budget2) =>
                 {
