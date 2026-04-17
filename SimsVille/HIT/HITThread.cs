@@ -93,7 +93,19 @@ namespace TSO.HIT
 
         public override  bool Tick() //true if continue, false if kill
         {
+            try
+            {
+                return TickInner();
+            }
+            catch (Microsoft.Xna.Framework.Audio.NoAudioHardwareException)
+            {
+                Dead = true;
+                return false; //headless/Xvfb: no audio, kill the thread silently
+            }
+        }
 
+        private bool TickInner()
+        {
             if (Paused) return true;
             TickN++;
 

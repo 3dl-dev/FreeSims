@@ -223,14 +223,14 @@ namespace TSO.HIT
                     var thread = new HITTVOn(evtent.TrackID, this);
                     thread.VolGroup = HITVolumeGroup.FX;
                     Threads.Add(thread);
-                    ActiveEvents.Add(evt, thread);
+                    ActiveEvents[evt] = thread;
                     return thread;
                 }
                 else if (evtent.EventType == HITEvents.kSetMusicMode)
                 {
                     var thread = new HITTVOn(evtent.TrackID, this, true);
                     thread.VolGroup = HITVolumeGroup.MUSIC;
-                    ActiveEvents.Add(evt, thread);
+                    ActiveEvents[evt] = thread;
                     if (NextMusic != null) NextMusic.Kill();
                     if (MusicEvent != null) MusicEvent.Fade();
                     NextMusic = thread;
@@ -244,7 +244,7 @@ namespace TSO.HIT
 
                     Threads.Add(thread);
                     if (!ActiveEvents.ContainsKey(evt))
-                        ActiveEvents.Add(evt, thread);
+                        ActiveEvents[evt] = thread;
 
                     if (InterruptBlocker != null)
                     {
@@ -258,7 +258,7 @@ namespace TSO.HIT
                 {
                     var thread = new HITThread(TrackID);
                     Threads.Add(thread);
-                    ActiveEvents.Add(evt, thread);
+                    ActiveEvents[evt] = thread;
 
                     if (InterruptBlocker != null)
                     {

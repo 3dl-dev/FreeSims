@@ -224,13 +224,19 @@ namespace FSO.Content
 
             if (data != null)
             {
-                var stream = new MemoryStream(data);
-
+                try
+                {
+                    var stream = new MemoryStream(data);
                     var sfx = SoundEffect.FromStream(stream);
                     stream.Close();
                     SFXCache.Add(InstanceID, sfx);
                     return sfx; //remember to clear the sfx cache between lots!
-
+                }
+                catch (Microsoft.Xna.Framework.Audio.NoAudioHardwareException)
+                {
+                    SFXCache[InstanceID] = null; //headless/Xvfb: stub silently
+                    return null;
+                }
             }
             else
             {
