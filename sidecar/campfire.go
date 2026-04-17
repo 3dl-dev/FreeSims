@@ -558,12 +558,16 @@ func perceptionBridge(ctx context.Context, client *protocol.Client, lotID string
 			if pid != 0 {
 				tags = append(tags, "sim:"+strconv.FormatUint(pid, 10))
 			}
-			if _, serr := client.Send(protocol.SendRequest{
+			resp, serr := client.Send(protocol.SendRequest{
 				CampfireID: lotID,
 				Payload:    payload,
 				Tags:       tags,
-			}); serr != nil {
-				log.Printf("[campfire] perception broadcast: %v", serr)
+			})
+			_ = resp
+			if serr != nil {
+				log.Printf("[campfire] perception broadcast pid=%d: %v", pid, serr)
+			} else {
+				log.Printf("[campfire] perception broadcast pid=%d ok", pid)
 			}
 		}
 	}

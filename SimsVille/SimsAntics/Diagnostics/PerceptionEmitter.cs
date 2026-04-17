@@ -36,12 +36,12 @@ namespace FSO.SimAntics.Diagnostics
             foreach (var entity in vm.Entities)
             {
                 if (entity is not VMAvatar avatar) continue;
+                if (_tickCounter % 300 == 1)
+                    Console.WriteLine($"[PerceptionEmitter] tick={_tickCounter} avatar={avatar.Name} persist={avatar.PersistID} queue={avatar.Thread?.Queue?.Count ?? -1}");
                 if (!ExternalControllerRegistry.IsControlled(avatar.PersistID)) continue;
 
-                // Only emit when the Sim is idle (queue empty or only idle-priority actions)
-                bool isIdle = avatar.Thread.Queue.Count == 0 ||
-                    avatar.Thread.Queue.All(a => a.Priority <= (short)VMQueuePriority.Idle);
-                if (!isIdle) continue;
+                // Externally-controlled Sims always get perception regardless of queue state.
+                // The rate limiter below prevents spam; the agent decides whether to interrupt.
 
                 // Rate limit per Sim
                 if (_lastEmitTick.TryGetValue(avatar.PersistID, out int lastTick) &&
@@ -50,16 +50,25 @@ namespace FSO.SimAntics.Diagnostics
 
                 _lastEmitTick[avatar.PersistID] = _tickCounter;
 
-                // Build perception JSON
-                var perception = BuildPerception(vm, avatar);
-                var json = JsonSerializer.SerializeToUtf8Bytes(perception);
+                try
+                {
+                    // Build perception JSON
+                    var perception = BuildPerception(vm, avatar);
+                    var json = JsonSerializer.SerializeToUtf8Bytes(perception);
 
-                // Frame it: [4-byte LE length][json bytes]
-                var frame = new byte[4 + json.Length];
-                BitConverter.TryWriteBytes(frame.AsSpan(0, 4), json.Length);
-                json.CopyTo(frame, 4);
+                    // Frame it: [4-byte LE length][json bytes]
+                    var frame = new byte[4 + json.Length];
+                    BitConverter.TryWriteBytes(frame.AsSpan(0, 4), json.Length);
+                    json.CopyTo(frame, 4);
 
-                sendFrame(frame);
+                    sendFrame(frame);
+                    if (_tickCounter % 300 == 1)
+                        Console.WriteLine($"[PerceptionEmitter] EMITTED tick={_tickCounter} {avatar.Name} persist={avatar.PersistID} jsonSize={json.Length}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[PerceptionEmitter] {avatar.Name} emit failed: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+                }
             }
         }
 

@@ -176,12 +176,16 @@ func main() {
 		}
 	}()
 
-	// Print perception events to stdout as JSONL (one line per event)
-	go func() {
-		for p := range client.PerceptionCh {
-			fmt.Println(string(p))
-		}
-	}()
+	// Print perception events to stdout as JSONL (one line per event) — only when
+	// campfire bridge isn't consuming. Channels are unicast; a second consumer
+	// would race the bridge and drop half the frames.
+	if !*campfire {
+		go func() {
+			for p := range client.PerceptionCh {
+				fmt.Println(string(p))
+			}
+		}()
+	}
 
 	// Print response frames (command correlation results) to stdout as JSONL
 	go func() {

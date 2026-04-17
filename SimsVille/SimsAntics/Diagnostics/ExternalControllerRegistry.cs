@@ -24,6 +24,7 @@ namespace FSO.SimAntics.Diagnostics
             if (_initialized) return;
             _initialized = true;
             _allControlled = Environment.GetEnvironmentVariable("FREESIMS_IPC_CONTROL_ALL") == "1";
+            Console.WriteLine($"[ExternalControllerRegistry] init: all={_allControlled}");
         }
 
         public static bool IsControlled(uint persistId)

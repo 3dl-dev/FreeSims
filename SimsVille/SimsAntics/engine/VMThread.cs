@@ -286,18 +286,10 @@ namespace FSO.SimAntics.Engine
                 bool Delete = ((Entity is VMGameObject) && (DialogCooldown > 30 * 20 - 10));
                  if (DialogCooldown == 0)
                 {
-
+                    // Suppress modal UI dialog — log to stderr so agent-driven runs
+                    // don't stall behind an OK button. Reset-on-error still happens below.
                     var simExcept = new VMSimanticsException(e.Message, context);
-                    string exceptionStr = "A SimAntics Exception has occurred, and has been suppressed: \r\n\r\n" + simExcept.ToString() + "\r\n\r\nThe object will be reset. Please report this!";
-                    VMDialogInfo info = new VMDialogInfo
-                    {
-                        Caller = null,
-                        Icon = context.Callee,
-                        Operand = new VMDialogOperand { },
-                        Message = exceptionStr,
-                        Title = "SimAntics Exception!"
-                    };
-                    Context.VM.SignalDialog(info);
+                    Console.Error.WriteLine($"[SimAnticsException] {simExcept}");
                     DialogCooldown = 30 * 20;
                 }
 
