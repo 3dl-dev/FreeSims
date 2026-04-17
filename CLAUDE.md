@@ -17,7 +17,7 @@ The multiplayer network layer (`VMServerDriver`/`VMClientDriver`, GonzoNet) is d
 - **Build:** `dotnet build SimsVille/SimsVille.csproj` (three projects: sims.files, sims.common, SimsVille)
 - **Run:** Xvfb :99 (1024x768) + x11vnc (VNC on localhost:5900). WSLg's X server hangs MonoGame's SDL event loop; Xvfb bypasses it.
 - **Game files:** Requires two asset trees — TSO client (from archive.org, script-fetched) + Sims 1 Complete Collection iso (user-supplied). See `docs/SETUP.md`.
-- **Shader pipeline:** 11 .xnb effect files rebuilt to MGFX v10 on x86_64 workshop (`baron@workshop.stealth.baron.local`) via wine-backed `mgfxc`. See `docs/SETUP.md` "Shader compilation" section. GrassShader uses a custom `DrawBaseUnlit` technique (bypasses FreeSO's unimplemented lighting pipeline).
+- **Shader pipeline:** 11 .xnb effect files, all MGFX v10 (rebuilt in commit `1eaedde`). Rebuild locally on any x86_64 host with wine-backed `mgfxc`: `mgfxc <name>.fx <name>.xnb /Profile:OpenGL` → `python3 scripts/wrap-xnb-effect.py <name>.xnb`. Requires `MGFXC_WINE_PATH=$HOME/.wine-mgfxc` (wine prefix with `d3dcompiler_47` + Windows .NET SDK). See `docs/SETUP.md` "Shader compilation" section. GrassShader currently uses the full upstream compile; `scripts/GrassShader.fx` contains an earlier `DrawBaseUnlit` stub that is stale and should be deleted.
 
 ## Repo Layout
 
@@ -51,13 +51,14 @@ FreeSims/
 - **BMP decoder rewritten.** `sims.files/ImageLoader.cs` uses a pure-managed BITMAPINFOHEADER reader (not System.Drawing.Bitmap, which is Windows-only in .NET 8). Supports 1/4/8/24/32 bpp BI_RGB/BI_BITFIELDS. PNG/JPG go through MonoGame's native Texture2D.FromStream.
 - **Camera clamped.** Edge-scroll disabled in UILotControl.cs; pan bounds tightened in World.cs. Home key recenters.
 - **Symlink required.** `SimsVille/bin/Debug/net8.0/GameAssets -> /home/baron/projects/FreeSims/GameAssets` (absolute). Created once; survives `dotnet build` but not `dotnet clean`. Re-create if missing: `ln -sf /home/baron/projects/FreeSims/GameAssets SimsVille/bin/Debug/net8.0/GameAssets`.
-- **Workshop SSH** (`baron@workshop.stealth.baron.local`) — x86_64 Ubuntu 24.04 VM used as a cross-compile farm for anything that can't run on arm64. Key-based auth, no password. Currently set up for shader compilation:
+- **Workshop** — `baron@workshop.stealth.baron.local` is an x86_64 Ubuntu 24.04 host used as a cross-compile farm. If `hostname` already reports `workshop`, you are on it — no ssh needed. Configuration:
   - `dotnet-sdk-8.0` installed, `dotnet tool install -g dotnet-mgfxc` done, `~/.dotnet/tools` on PATH.
   - Wine prefix at `~/.wine-mgfxc` (WINEARCH=win64) with `d3dcompiler_47` + Windows dotnet SDK 8.0.201 installed.
-  - `MGFXC_WINE_PATH=$HOME/.wine-mgfxc` enables `mgfxc` to find the prefix.
-  - **Recipe:** rsync .fx sources to workshop → `mgfxc <name>.fx <name>.xnb /Profile:OpenGL` → `python3 scripts/wrap-xnb-effect.py <name>.xnb` (XNBd wrapper) → rsync .xnb back → place in `SimsVille/Content/OGL/Effects/`. Full recipe in `docs/SETUP.md` "Shader compilation" section.
-  - Required only when .fx sources change or MonoGame upgrades the MGFX binary version. The committed .xnb files are MGFX v10 and work with MG 3.8.x.
-  - `wine32:i386` must NOT be installed on workshop — Ubuntu's wine wrapper prefers 32-bit wine when both are present, breaking mgfxc.
+  - `export MGFXC_WINE_PATH=$HOME/.wine-mgfxc` is required per shell before invoking `mgfxc`.
+  - **Recipe (local on workshop):** `mgfxc <name>.fx <name>.xnb /Profile:OpenGL` → `python3 scripts/wrap-xnb-effect.py <name>.xnb` → drop into `SimsVille/Content/OGL/Effects/`. No rsync hops.
+  - **Recipe (from another host):** rsync .fx sources to workshop → run the local recipe → rsync .xnb back.
+  - Only needed when .fx sources change or MonoGame upgrades the MGFX binary version. Committed .xnb files are MGFX v10 (since `1eaedde`).
+  - `wine32:i386` must NOT be installed on workshop — Ubuntu's wine wrapper prefers 32-bit wine when both are present, breaking mgfxc. The warning "it looks like wine32 is missing" printed by mgfxc is expected and non-fatal.
 
 ## Work Management
 
@@ -150,7 +151,7 @@ Stages 2–5 from the original plan are **done** (VMIPCDriver, sidecar, conventi
 
 ### Critical path to working demo
 
-1. **reeims-fc8** (P1) — duplicate Gerry avatar: 3 sims spawned, only 2 expected. Game binary not rebuildable locally (csproj targets .NET Framework 4.5). Needs workshop investigation. Workaround: demo discovers sims from perception at runtime.
+1. **reeims-fc8** (P1) — duplicate Gerry avatar: 3 sims spawned, only 2 expected. Workaround: demo discovers sims from perception at runtime. The "not rebuildable locally" concern is obsolete — `dotnet build SimsVille/SimsVille.csproj` works on any host with dotnet 8 SDK (csproj is SDK-style net8.0, not the old v4.5 claim).
 2. **reeims-6d4** (P1) — Demo: 2 embodied Sims × 15 in-game minutes end-to-end validation. Depends on fc8 workaround or fix.
 3. **reeims-767** (P2) — PerceptionEmitter filter mis-fires when controlled Sim's PersistID diverges (related to fc8).
 
@@ -165,7 +166,7 @@ Run `rd ready` for the full list. Priorities: 1 P0 (save-sim round-trip test), 1
 
 ## Build Constraints
 
-- **C# binary not rebuildable locally.** `SimsVille.csproj` targets .NETFramework v4.5 in old-style format. `dotnet build` fails with "reference assemblies for .NETFramework,Version=v4.5 were not found." The binary at `bin/Debug/net8.0/SimsVille` was pre-built (possibly on workshop or via a different toolchain). Any C# changes require the workshop (`baron@workshop.stealth.baron.local`) or a toolchain fix.
+- **C# binary builds locally.** `SimsVille.csproj` is SDK-style targeting `net8.0`. Build with `dotnet build SimsVille/SimsVille.csproj -c Debug` (≈2–6s incremental, 0 errors). Outputs land at `SimsVille/bin/Debug/net8.0/SimsVille.dll` and a native apphost launcher at `SimsVille/bin/Debug/net8.0/SimsVille`. Any .NET 8 SDK host can rebuild — no workshop/ssh required.
 - **Go sidecar builds fine.** `cd sidecar && go build -o freesims-sidecar .` — requires Go 1.25+ (campfire v0.19.2 dependency).
 - **Python agent needs** `claude-agent-sdk` (pip install) and `cf` CLI on PATH.
 - **Game env vars:** `FREESIMS_IPC=1 FREESIMS_IPC_CONTROL_ALL=1 FREESIMS_OBSERVER=1` for IPC + perception.
