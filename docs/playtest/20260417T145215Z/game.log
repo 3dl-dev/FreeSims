@@ -1,0 +1,203 @@
+Project FreeSims Started...
+SimsVille loading... 
+xcb_connection_has_error() returned true
+ALSA lib confmisc.c:855:(parse_card) cannot find card '0'
+ALSA lib conf.c:5204:(_snd_config_evaluate) function snd_func_card_inum returned error: No such file or directory
+ALSA lib confmisc.c:422:(snd_func_concat) error evaluating strings
+ALSA lib conf.c:5204:(_snd_config_evaluate) function snd_func_concat returned error: No such file or directory
+ALSA lib confmisc.c:1342:(snd_func_refer) error evaluating name
+ALSA lib conf.c:5204:(_snd_config_evaluate) function snd_func_refer returned error: No such file or directory
+ALSA lib conf.c:5727:(snd_config_expand) Evaluate error: No such file or directory
+ALSA lib pcm.c:2721:(snd_pcm_open_noupdate) Unknown PCM default
+AL lib: (EE) ALCplaybackAlsa_open: Could not open playback device 'default': No such file or directory
+[autoload] charFiles=2 houseFiles=3
+[autoload] char=Content/Characters/Daisy.xml house=Content/Houses/house1.xml
+[VMIPCDriver] Listening on /tmp/freesims-ipc.sock
+[autoload] InitTestLot returned. vm=True World=True ZoomLevel=1
+[ExternalControllerRegistry] init: all=True
+[PerceptionEmitter] tick=1 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=1 Gerry persist=28 jsonSize=2435
+[PerceptionEmitter] tick=1 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=1 Daisy persist=1795717786 jsonSize=2622
+[PerceptionEmitter] tick=301 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=301 Gerry persist=28 jsonSize=2529
+[PerceptionEmitter] tick=301 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=301 Daisy persist=1795717786 jsonSize=2686
+[PerceptionEmitter] tick=601 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=601 Gerry persist=28 jsonSize=2527
+[PerceptionEmitter] tick=601 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=601 Daisy persist=1795717786 jsonSize=2684
+[VMIPCDriver] Client connected.
+[PerceptionEmitter] tick=901 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=901 Gerry persist=28 jsonSize=2534
+[PerceptionEmitter] tick=901 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=901 Daisy persist=1795717786 jsonSize=2691
+[PerceptionEmitter] tick=1201 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=1201 Gerry persist=28 jsonSize=2521
+[PerceptionEmitter] tick=1201 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=1201 Daisy persist=1795717786 jsonSize=2678
+[PerceptionEmitter] tick=1501 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=1501 Gerry persist=28 jsonSize=2533
+[PerceptionEmitter] tick=1501 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=1501 Daisy persist=1795717786 jsonSize=2690
+[PerceptionEmitter] tick=1801 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=1801 Gerry persist=28 jsonSize=2534
+[PerceptionEmitter] tick=1801 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=1801 Daisy persist=1795717786 jsonSize=2691
+[PerceptionEmitter] tick=2101 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=2101 Gerry persist=28 jsonSize=2540
+[PerceptionEmitter] tick=2101 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=2101 Daisy persist=1795717786 jsonSize=2697
+[PerceptionEmitter] tick=2401 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=2401 Gerry persist=28 jsonSize=2536
+[PerceptionEmitter] tick=2401 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=2401 Daisy persist=1795717786 jsonSize=2693
+[PerceptionEmitter] tick=2701 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=2701 Gerry persist=28 jsonSize=2530
+[PerceptionEmitter] tick=2701 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=2701 Daisy persist=1795717786 jsonSize=2687
+[PerceptionEmitter] tick=3001 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=3001 Gerry persist=28 jsonSize=2532
+[PerceptionEmitter] tick=3001 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=3001 Daisy persist=1795717786 jsonSize=2689
+[PerceptionEmitter] tick=3301 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=3301 Gerry persist=28 jsonSize=2534
+[PerceptionEmitter] tick=3301 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=3301 Daisy persist=1795717786 jsonSize=2691
+[PerceptionEmitter] tick=3601 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=3601 Gerry persist=28 jsonSize=2534
+[PerceptionEmitter] tick=3601 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=3601 Daisy persist=1795717786 jsonSize=2691
+[PerceptionEmitter] tick=3901 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=3901 Gerry persist=28 jsonSize=2545
+[PerceptionEmitter] tick=3901 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=3901 Daisy persist=1795717786 jsonSize=2690
+[PerceptionEmitter] tick=4201 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=4201 Gerry persist=28 jsonSize=2536
+[PerceptionEmitter] tick=4201 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=4201 Daisy persist=1795717786 jsonSize=2681
+[PerceptionEmitter] tick=4501 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=4501 Gerry persist=28 jsonSize=2518
+[PerceptionEmitter] tick=4501 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=4501 Daisy persist=1795717786 jsonSize=2681
+[PerceptionEmitter] tick=4801 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=4801 Gerry persist=28 jsonSize=2525
+[PerceptionEmitter] tick=4801 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=4801 Daisy persist=1795717786 jsonSize=2688
+[PerceptionEmitter] tick=5101 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=5101 Gerry persist=28 jsonSize=2532
+[PerceptionEmitter] tick=5101 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=5101 Daisy persist=1795717786 jsonSize=2695
+[PerceptionEmitter] tick=5401 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=5401 Gerry persist=28 jsonSize=2536
+[PerceptionEmitter] tick=5401 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=5401 Daisy persist=1795717786 jsonSize=2683
+[PerceptionEmitter] tick=5701 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=5701 Gerry persist=28 jsonSize=2543
+[PerceptionEmitter] tick=5701 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=5701 Daisy persist=1795717786 jsonSize=2690
+[PerceptionEmitter] tick=6001 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=6001 Gerry persist=28 jsonSize=2517
+[PerceptionEmitter] tick=6001 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=6001 Daisy persist=1795717786 jsonSize=2674
+[PerceptionEmitter] tick=6301 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=6301 Gerry persist=28 jsonSize=2522
+[PerceptionEmitter] tick=6301 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=6301 Daisy persist=1795717786 jsonSize=2687
+[PerceptionEmitter] tick=6601 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=6601 Gerry persist=28 jsonSize=2527
+[PerceptionEmitter] tick=6601 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=6601 Daisy persist=1795717786 jsonSize=2678
+[PerceptionEmitter] tick=6901 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=6901 Gerry persist=28 jsonSize=2525
+[PerceptionEmitter] tick=6901 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=6901 Daisy persist=1795717786 jsonSize=2692
+[PerceptionEmitter] tick=7201 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=7201 Gerry persist=28 jsonSize=2531
+[PerceptionEmitter] tick=7201 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=7201 Daisy persist=1795717786 jsonSize=2694
+[PerceptionEmitter] tick=7501 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=7501 Gerry persist=28 jsonSize=2527
+[PerceptionEmitter] tick=7501 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=7501 Daisy persist=1795717786 jsonSize=2687
+[PerceptionEmitter] tick=7801 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=7801 Gerry persist=28 jsonSize=3193
+[PerceptionEmitter] tick=7801 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=7801 Daisy persist=1795717786 jsonSize=3368
+[PerceptionEmitter] tick=8101 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=8101 Gerry persist=28 jsonSize=3197
+[PerceptionEmitter] tick=8101 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=8101 Daisy persist=1795717786 jsonSize=3377
+[PerceptionEmitter] tick=8401 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=8401 Gerry persist=28 jsonSize=3211
+[PerceptionEmitter] tick=8401 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=8401 Daisy persist=1795717786 jsonSize=3375
+[PerceptionEmitter] tick=8701 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=8701 Gerry persist=28 jsonSize=3210
+[PerceptionEmitter] tick=8701 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=8701 Daisy persist=1795717786 jsonSize=3375
+[PerceptionEmitter] tick=9001 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=9001 Gerry persist=28 jsonSize=3195
+[PerceptionEmitter] tick=9001 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=9001 Daisy persist=1795717786 jsonSize=3376
+[PerceptionEmitter] tick=9301 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=9301 Gerry persist=28 jsonSize=3196
+[PerceptionEmitter] tick=9301 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=9301 Daisy persist=1795717786 jsonSize=3377
+[PerceptionEmitter] tick=9601 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=9601 Gerry persist=28 jsonSize=3196
+[PerceptionEmitter] tick=9601 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=9601 Daisy persist=1795717786 jsonSize=3377
+[PerceptionEmitter] tick=9901 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=9901 Gerry persist=28 jsonSize=3194
+[PerceptionEmitter] tick=9901 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=9901 Daisy persist=1795717786 jsonSize=3375
+[PerceptionEmitter] tick=10201 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=10201 Gerry persist=28 jsonSize=3194
+[PerceptionEmitter] tick=10201 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=10201 Daisy persist=1795717786 jsonSize=3375
+[PerceptionEmitter] tick=10501 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=10501 Gerry persist=28 jsonSize=3193
+[PerceptionEmitter] tick=10501 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=10501 Daisy persist=1795717786 jsonSize=3361
+[PerceptionEmitter] tick=10801 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=10801 Gerry persist=28 jsonSize=3202
+[PerceptionEmitter] tick=10801 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=10801 Daisy persist=1795717786 jsonSize=3360
+[PerceptionEmitter] tick=11101 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=11101 Gerry persist=28 jsonSize=3178
+[PerceptionEmitter] tick=11101 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=11101 Daisy persist=1795717786 jsonSize=3360
+[PerceptionEmitter] tick=11401 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=11401 Gerry persist=28 jsonSize=3169
+[PerceptionEmitter] tick=11401 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=11401 Daisy persist=1795717786 jsonSize=3375
+[PerceptionEmitter] tick=11701 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=11701 Gerry persist=28 jsonSize=2195
+[PerceptionEmitter] tick=11701 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=11701 Daisy persist=1795717786 jsonSize=2391
+[PerceptionEmitter] tick=12001 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=12001 Gerry persist=28 jsonSize=2188
+[PerceptionEmitter] tick=12001 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=12001 Daisy persist=1795717786 jsonSize=2360
+[SimAnticsException] Index was out of range. Must be non-negative and less than the size of the collection. (Parameter 'index')
+
+(Daisy:Daisy) 
+ > Main:6 (idle_for_input)
+
+[PerceptionEmitter] tick=12301 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=12301 Gerry persist=28 jsonSize=2207
+[PerceptionEmitter] tick=12301 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=12301 Daisy persist=1795717786 jsonSize=2379
+[PerceptionEmitter] tick=12601 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=12601 Gerry persist=28 jsonSize=2233
+[PerceptionEmitter] tick=12601 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=12601 Daisy persist=1795717786 jsonSize=2397
+[PerceptionEmitter] tick=12901 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=12901 Gerry persist=28 jsonSize=2234
+[PerceptionEmitter] tick=12901 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=12901 Daisy persist=1795717786 jsonSize=2398
+[PerceptionEmitter] tick=13201 avatar=Gerry persist=28 queue=2
+[PerceptionEmitter] EMITTED tick=13201 Gerry persist=28 jsonSize=2367
+[PerceptionEmitter] tick=13201 avatar=Daisy persist=1795717786 queue=2
+[PerceptionEmitter] EMITTED tick=13201 Daisy persist=1795717786 jsonSize=2537

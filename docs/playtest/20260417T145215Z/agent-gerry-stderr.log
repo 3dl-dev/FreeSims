@@ -1,0 +1,5 @@
+[sim-agent-v4] started (sim='Gerry' persist_id=28 lot=e824584adc52…)
+[sim-agent-v4] loaded 16 convention declarations
+[sim-agent-v4] invoke interact-with failed: Command '['cf', '--cf-home', '/tmp/cf-agent-Gerry-playtest', '--json', 'e824584adc52b98bee8fa78f1496550251026bd850178c4ccf2081578e8b7a44', 'interact-with', '--object_id', '43', '--interaction_id', '0', '--sim_id', '28']' timed out after 30.0 seconds
+[sim-agent-v4] invoke interact-with failed: Command '['cf', '--cf-home', '/tmp/cf-agent-Gerry-playtest', '--json', 'e824584adc52b98bee8fa78f1496550251026bd850178c4ccf2081578e8b7a44', 'interact-with', '--object_id', '43', '--interaction_id', '0', '--sim_id', '28']' timed out after 30.0 seconds
+[sim-agent-v4] invoke interact-with failed: Command '['cf', '--cf-home', '/tmp/cf-agent-Gerry-playtest', '--json', 'e824584adc52b98bee8fa78f1496550251026bd850178c4ccf2081578e8b7a44', 'interact-with', '--object_id', '48', '--interaction_id', '2', '--sim_id', '28']' timed out after 30.0 seconds

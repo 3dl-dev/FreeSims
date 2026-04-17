@@ -94,7 +94,7 @@ namespace SimsVille.UI.Model
             Stream stream = File.Open("Content/nhood.png", FileMode.Open, FileAccess.ReadWrite);
             TerrainImage = Texture2D.FromStream(m_GraphicsDevice, stream);
 
-            Shader2D = GameFacade.Game.Content.Load<Effect>("Effects\\colorpoly2d");
+            Shader2D = GameFacade.Game.Content.Load<Effect>("Effects\\colorpoly2D");
 
             m_WhiteLine = new Texture2D(m_GraphicsDevice, 1, 1);
             m_WhiteLine.SetData<Color>(new Color[] { Color.White });

@@ -1,0 +1,3 @@
+[sim-agent-v4] started (sim='Daisy' persist_id=1795717786 lot=e824584adc52…)
+[sim-agent-v4] loaded 16 convention declarations
+[sim-agent-v4] invoke walk-to failed: Command '['cf', '--cf-home', '/tmp/cf-agent-Daisy-playtest', '--json', 'e824584adc52b98bee8fa78f1496550251026bd850178c4ccf2081578e8b7a44', 'walk-to', '--target_object_id', '28', '--sim_id', '1795717786']' timed out after 30.0 seconds
