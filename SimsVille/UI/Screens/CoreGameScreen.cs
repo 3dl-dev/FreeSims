@@ -748,6 +748,11 @@ namespace FSO.Client.UI.Screens
             // Wire dialog events to the IPC driver after the VM driver is set.
             ipcDriver?.SubscribeToVM(vm);
 
+            // Wire the lot-load delegate so VMNetLoadLotCmd can queue a UI-thread
+            // reload without reflection. This replaces the Type.GetType/GetMethod
+            // path that broke under rename, AOT, and trimming (reeims-e76).
+            FSO.SimAntics.NetPlay.Model.Commands.VMNetLoadLotCmd.LotLoadDelegate = RequestLotLoad;
+
 
 
             IffFile HouseFile = new IffFile();
