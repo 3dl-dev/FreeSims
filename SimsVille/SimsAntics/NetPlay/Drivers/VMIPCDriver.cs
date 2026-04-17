@@ -54,6 +54,10 @@ namespace FSO.SimAntics.NetPlay.Drivers
         // Guards concurrent writes to _client.Send from Tick(), OnDialog, and OnPathfindFailed.
         private readonly object _sendLock = new object();
 
+        // Tracks the VM instance to which OnDialog is subscribed so CloseNet can
+        // unsubscribe cleanly and prevent handler accumulation across lot reloads.
+        private VM _subscribedVM;
+
         // Dialog tracking: monotonic counter → pending dialog info (caller PersistID + label).
         // Dialogs are stored until an agent responds or the VM discards them.
         private int _nextDialogId;
@@ -93,8 +97,17 @@ namespace FSO.SimAntics.NetPlay.Drivers
         /// </summary>
         public void SubscribeToVM(VM vm)
         {
+            // Defensive: if already subscribed to a previous VM instance (e.g. across
+            // lot reloads), unsubscribe first to prevent duplicate handler accumulation.
+            if (_subscribedVM != null)
+            {
+                _subscribedVM.OnDialog -= HandleVMDialog;
+                _subscribedVM = null;
+            }
+
             vm.OnDialog += HandleVMDialog;
             vm.OnChatEvent += (evt) => HandleVMChatEvent(vm, evt);
+            _subscribedVM = vm;
         }
 
         public override void SendCommand(VMNetCommandBodyAbstract cmd)
@@ -141,6 +154,14 @@ namespace FSO.SimAntics.NetPlay.Drivers
             _disposed = true;
 
             VMRoutingFrame.OnPathfindFailed -= HandlePathfindFailed;
+
+            // Unsubscribe from the VM's OnDialog event to prevent handler accumulation
+            // across lot reloads (reeims-28e).
+            if (_subscribedVM != null)
+            {
+                _subscribedVM.OnDialog -= HandleVMDialog;
+                _subscribedVM = null;
+            }
 
             try { _client?.Shutdown(SocketShutdown.Both); } catch { }
             try { _client?.Close(); } catch { }
