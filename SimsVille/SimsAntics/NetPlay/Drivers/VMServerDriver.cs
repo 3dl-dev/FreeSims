@@ -242,35 +242,14 @@ namespace FSO.SimAntics.NetPlay.Drivers
 
         private void Broadcast(byte[] packet, HashSet<NetworkClient> ignore)
         {
-            lock (listener.Clients)
-            {
-                var clients = new List<NetworkClient>(listener.Clients);
-                foreach (var client in clients)
-                {
-                    if (ignore.Contains(client)) continue;
-                    client.Send(packet);
-                }
-            }
+            // Server networking disabled in FreeSims fork (VMLocalDriver/VMIPCDriver only).
+            // GonzoNet's listener.Clients returns SynchronizedCollection<T> from System.ServiceModel
+            // v3.0.0.0 which is not available in .NET 8. Stub to avoid type-resolution failure.
         }
 
         private void HandleClients()
         {
-            lock (listener.Clients)
-            {
-                ClientsToDC.Clear();
-                foreach (var client in listener.Clients)
-                {
-                    var packets = client.GetPackets();
-                    while (packets.Count > 0)
-                    {
-                        OnPacket(client, packets.Dequeue());
-                    }
-                }
-                foreach (var client in ClientsToDC)
-                {
-                    client.Disconnect();
-                }
-            }
+            // Server networking disabled in FreeSims fork. Stub to avoid GonzoNet type-resolution issue.
         }
 
         private void SendGenericMessage(NetworkClient client, string title, string msg)
@@ -383,16 +362,7 @@ namespace FSO.SimAntics.NetPlay.Drivers
         {
             var cleanIP = ip.Trim(' ').ToLowerInvariant();
             var badClients = new List<NetworkClient>();
-            lock (listener.Clients)
-            {
-                foreach (var client in listener.Clients)
-                {
-                    if (client.RemoteIP.ToLowerInvariant() == cleanIP) {
-                        SendGenericMessage(client, "Yikes", "You have just been banned from this sandbox server!");
-                        badClients.Add(client);
-                    }
-                }
-            }
+            // listener.Clients type resolution disabled — server networking not used in FreeSims fork.
             foreach (var client in badClients) {
                 new Thread(() =>
                 {
