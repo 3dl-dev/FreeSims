@@ -17,9 +17,12 @@
        it compiles cleanly into the test assembly. -->
   <!-- Include LooksLikeSynthesizer (pure, no MonoGame deps) for unit tests of
        the looks_like synthesis algorithm (reeims-5e3). -->
+  <!-- Include VMHouseXmlValidator (pure, no MonoGame deps) for path-validation
+       unit tests (reeims-e54). -->
   <ItemGroup>
     <Compile Include="..\SimsVille\SimsAntics\Diagnostics\SimSaveStore.cs" LinkBase="IncludedFromSimsVille" />
     <Compile Include="..\SimsVille\SimsAntics\Diagnostics\LooksLikeSynthesizer.cs" LinkBase="IncludedFromSimsVille" />
+    <Compile Include="..\SimsVille\SimsAntics\NetPlay\Model\Commands\VMHouseXmlValidator.cs" LinkBase="IncludedFromSimsVille" />
   </ItemGroup>
 
   <ItemGroup>

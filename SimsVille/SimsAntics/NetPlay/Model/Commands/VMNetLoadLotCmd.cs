@@ -64,10 +64,11 @@ namespace FSO.SimAntics.NetPlay.Model.Commands
             if (driver == null)
                 return false; // only meaningful under IPC driver
 
-            if (string.IsNullOrEmpty(HouseXml))
+            if (!VMHouseXmlValidator.IsValidHouseXml(HouseXml))
             {
                 if (reqId != null)
-                    driver.SendLoadLotResponse(reqId, "error", "empty house_xml");
+                    driver.SendLoadLotResponse(reqId, "error",
+                        string.IsNullOrEmpty(HouseXml) ? "empty house_xml" : "invalid house_xml path");
                 return false;
             }
 
