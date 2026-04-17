@@ -1,0 +1,35 @@
+
+# Claude Code / rd
+.claude/settings.local.json
+.claude/worktrees/
+.ready/
+.campfire/
+.telemetry/
+
+# cf identity (per-machine)
+.cf/
+
+# Python bytecode
+**/__pycache__/
+*.pyc
+
+# Original game assets — never commit (MPL 2.0 engine is open, Sims 1 assets are not)
+.assets-src/
+GameAssets/
+
+# Build output
+SimsVille/bin/
+SimsVille/obj/
+sims.common/bin/
+sims.common/obj/
+sims.files/bin/
+sims.files/obj/
+sims.parser/obj/
+sims.debug/obj/
+SimsNet/bin/
+SimsNet/obj/
+SimsVille.Tests/bin/
+SimsVille.Tests/obj/
+
+# Go sidecar binary
+sidecar/freesims-sidecar
