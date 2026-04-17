@@ -45,6 +45,8 @@ namespace FSO.Files.Formats.IFF.Chunks
                     NeighborhoodData[i] = io.ReadInt16();
                 }
 
+                if (stream.Position >= stream.Length) return; // pre-Hot Date: no inventory section
+
                 var count = io.ReadInt32();
                 for (int i = 0; i < count; i++)
                 {
