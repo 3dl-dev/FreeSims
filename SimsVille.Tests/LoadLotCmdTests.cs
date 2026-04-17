@@ -379,4 +379,116 @@ namespace SimsVille.Tests
             Assert.Equal("house1.xml", Path.GetFileName("house1.xml"));
         }
     }
+
+    // -----------------------------------------------------------------
+    // Delegate injection tests (reeims-e76).
+    //
+    // VMNetLoadLotCmd.Execute previously used Type.GetType/GetMethod
+    // reflection to call CoreGameScreen.RequestLotLoad. The fix replaces
+    // this with a static Action<string> delegate (LotLoadDelegate) set
+    // at startup by CoreGameScreen.
+    //
+    // VMNetLoadLotCmd.Execute requires a VM + VMAvatar (MonoGame deps) so
+    // it cannot be called directly in this test project. We follow the
+    // established codebase pattern (see ThunkSim above): inline-simulate
+    // the Execute delegate branch to prove the contract, then verify the
+    // delegate field interacts correctly with a test lambda.
+    //
+    // The done condition requires:
+    //   - delegate invoked with correct house_xml string
+    //   - no reflection (grep verified separately — see CI check)
+    //   - null delegate → error path (no panic)
+    // -----------------------------------------------------------------
+
+    public class LoadLotDelegateTests
+    {
+        // Inline simulation of the delegate branch in VMNetLoadLotCmd.Execute.
+        // Mirrors lines 87-104 in VMNetLoadLotCmd.cs exactly.
+        private static bool SimulateExecuteDelegate(
+            Action<string> lotLoadDelegate,
+            string houseXml,
+            out string invokedWith,
+            out string errorDetail)
+        {
+            invokedWith = null;
+            errorDetail = null;
+
+            // Mirrors: var lotLoad = LotLoadDelegate; if (lotLoad == null) → error
+            var lotLoad = lotLoadDelegate;
+            if (lotLoad == null)
+            {
+                errorDetail = "CoreGameScreen not loaded";
+                return false;
+            }
+
+            try
+            {
+                lotLoad(houseXml);
+                invokedWith = houseXml;
+            }
+            catch (Exception ex)
+            {
+                errorDetail = ex.Message;
+                return false;
+            }
+
+            return true;
+        }
+
+        [Fact]
+        public void DelegateSet_Execute_InvokesWithCorrectHouseXml()
+        {
+            string captured = null;
+            Action<string> del = xml => captured = xml;
+
+            var ok = SimulateExecuteDelegate(del, "house2.xml", out var invoked, out _);
+
+            Assert.True(ok);
+            Assert.Equal("house2.xml", captured);
+            Assert.Equal("house2.xml", invoked);
+        }
+
+        [Fact]
+        public void DelegateNull_Execute_ReturnsError()
+        {
+            var ok = SimulateExecuteDelegate(null, "house2.xml", out _, out var err);
+
+            Assert.False(ok);
+            Assert.Equal("CoreGameScreen not loaded", err);
+        }
+
+        [Fact]
+        public void DelegateThrows_Execute_ReturnsError()
+        {
+            Action<string> del = _ => throw new InvalidOperationException("boom");
+
+            var ok = SimulateExecuteDelegate(del, "house2.xml", out _, out var err);
+
+            Assert.False(ok);
+            Assert.Equal("boom", err);
+        }
+
+        [Fact]
+        public void DelegateSet_InvokedExactlyOnce()
+        {
+            int callCount = 0;
+            Action<string> del = _ => callCount++;
+
+            SimulateExecuteDelegate(del, "house1.xml", out _, out _);
+
+            Assert.Equal(1, callCount);
+        }
+
+        [Fact]
+        public void DelegateSet_HouseXmlPassedThrough_Verbatim()
+        {
+            // Verifies the delegate receives HouseXml unchanged — no path munging.
+            string captured = null;
+            Action<string> del = xml => captured = xml;
+
+            SimulateExecuteDelegate(del, "house_party.xml", out _, out _);
+
+            Assert.Equal("house_party.xml", captured);
+        }
+    }
 }

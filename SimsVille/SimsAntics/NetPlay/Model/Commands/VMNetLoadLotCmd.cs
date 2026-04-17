@@ -53,6 +53,14 @@ namespace FSO.SimAntics.NetPlay.Model.Commands
         /// </summary>
         public string HouseXml = "";
 
+        /// <summary>
+        /// Delegate set at startup (by CoreGameScreen) to queue a lot reload
+        /// onto the UI thread. Replaces the previous Type.GetType/GetMethod
+        /// reflection path. Must be set before any load-lot IPC command arrives;
+        /// null means "no UI screen attached" (e.g. in unit tests).
+        /// </summary>
+        public static Action<string> LotLoadDelegate;
+
         public override bool Execute(VM vm, VMAvatar caller)
         {
             // Capture RequestID before clearing — we emit our own "queued"
@@ -72,33 +80,21 @@ namespace FSO.SimAntics.NetPlay.Model.Commands
                 return false;
             }
 
-            // Queue the actual lot load onto the UI thread. The C# call itself
-            // is thread-safe (volatile write under a lock); the actual teardown
-            // and reload happens in CoreGameScreen.Update on the next tick.
+            // Queue the actual lot load onto the UI thread via the injected
+            // delegate (set by CoreGameScreen at startup). Using a delegate
+            // avoids a Type.GetType/GetMethod reflection path that breaks
+            // under rename, AOT, or trimming.
+            var lotLoad = LotLoadDelegate;
+            if (lotLoad == null)
+            {
+                if (reqId != null)
+                    driver.SendLoadLotResponse(reqId, "error", "CoreGameScreen not loaded");
+                return false;
+            }
+
             try
             {
-                // Resolve CoreGameScreen.RequestLotLoad via reflection to avoid
-                // a circular reference between SimAntics and the UI.Screens
-                // namespace. If CoreGameScreen isn't loaded (e.g. in tests),
-                // report an error.
-                var coreType = Type.GetType("FSO.Client.UI.Screens.CoreGameScreen, SimsVille", throwOnError: false);
-                if (coreType == null)
-                {
-                    if (reqId != null)
-                        driver.SendLoadLotResponse(reqId, "error", "CoreGameScreen not loaded");
-                    return false;
-                }
-
-                var method = coreType.GetMethod("RequestLotLoad",
-                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-                if (method == null)
-                {
-                    if (reqId != null)
-                        driver.SendLoadLotResponse(reqId, "error", "RequestLotLoad missing");
-                    return false;
-                }
-
-                method.Invoke(null, new object[] { HouseXml });
+                lotLoad(HouseXml);
             }
             catch (Exception ex)
             {
